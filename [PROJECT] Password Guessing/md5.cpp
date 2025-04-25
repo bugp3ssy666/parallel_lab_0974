@@ -7,23 +7,23 @@ using namespace std;
 using namespace chrono;
 
 /**
- * StringProcess: 将单个输入字符串转换成MD5计算所需的消息数组
+ * StringProcess: 将单个输入字符串转换成 MD5 计算所需的消息数组
  * @param input 输入
- * @param[out] n_byte 用于给调用者传递额外的返回值，即最终Byte数组的长度
- * @return Byte消息数组
+ * @param[out] n_byte 用于给调用者传递额外的返回值，即最终 Byte 数组的长度
+ * @return Byte 消息数组
  */
 Byte *StringProcess(string input, int *n_byte)
 {
-	// 将输入的字符串转换为Byte为单位的数组
+	// 将输入的字符串转换为 Byte 为单位的数组
 	Byte *blocks = (Byte *)input.c_str();
 	int length = input.length();
 
 	// 计算原始消息长度（以比特为单位）
 	int bitLength = length * 8;
 
-	// paddingBits: 原始消息需要的padding长度（以bit为单位）
-	// 对于给定的消息，将其补齐至length%512==448为止
-	// 需要注意的是，即便给定的消息满足length%512==448，也需要再pad 512bits
+	// paddingBits: 原始消息需要的 padding 长度（以 bit 为单位）
+	// 对于给定的消息，将其补齐至 length%512==448 为止
+	// 需要注意的是，即便给定的消息满足 length%512==448，也需要再 pad 512bits
 	int paddingBits = bitLength % 512;
 	if (paddingBits > 448)
 	{
@@ -38,13 +38,13 @@ Byte *StringProcess(string input, int *n_byte)
 		paddingBits = 512;
 	}
 
-	// 原始消息需要的padding长度（以Byte为单位）
+	// 原始消息需要的 padding 长度（以 Byte 为单位）
 	int paddingBytes = paddingBits / 8;
 	// 创建最终的字节数组
 	// length + paddingBytes + 8:
-	// 1. length为原始消息的长度（bits）
-	// 2. paddingBytes为原始消息需要的padding长度（Bytes）
-	// 3. 在pad到length%512==448之后，需要额外附加64bits的原始消息长度，即8个bytes
+	// 1. length 为原始消息的长度（bits）
+	// 2. paddingBytes 为原始消息需要的 padding 长度（Bytes）
+	// 3. 在 pad 到 length%512==448 之后，需要额外附加 64bits 的原始消息长度，即 8 个 bytes
 	int paddedLength = length + paddingBytes + 8;
 	Byte *paddedMessage = new Byte[paddedLength];
 
@@ -52,28 +52,33 @@ Byte *StringProcess(string input, int *n_byte)
 	memcpy(paddedMessage, blocks, length);
 
 	// 添加填充字节。填充时，第一位为1，后面的所有位均为0。
-	// 所以第一个byte是0x80
-	paddedMessage[length] = 0x80;							 // 添加一个0x80字节
-	memset(paddedMessage + length + 1, 0, paddingBytes - 1); // 填充0字节
+	// 所以第一个 byte 是 0x80
+	paddedMessage[length] = 0x80;							 // 添加一个 0x80 字节
+	memset(paddedMessage + length + 1, 0, paddingBytes - 1); // 填充 0 字节
 
 	// 添加消息长度（64比特，小端格式）
 	for (int i = 0; i < 8; ++i)
 	{
-		// 特别注意此处应当将bitLength转换为uint64_t
-		// 这里的length是原始消息的长度
+		// 特别注意此处应当将 bitLength 转换为 uint64_t
+		// 这里的 length 是原始消息的长度
 		paddedMessage[length + paddingBytes + i] = ((uint64_t)length * 8 >> (i * 8)) & 0xFF;
 	}
 
-	// 验证长度是否满足要求。此时长度应当是512bit的倍数
+	// 验证长度是否满足要求。此时长度应当是 512bit 的倍数
 	int residual = 8 * paddedLength % 512;
 	assert(residual == 0);
 
-	// 在填充+添加长度之后，消息被分为n_blocks个512bit的部分
+	// 在填充+添加长度之后，消息被分为 n_blocks 个 512bit 的部分
 	*n_byte = paddedLength;
 	return paddedMessage;
 }
 
-
+/**
+ * CalculatePadded: SIMD 优化中用于计算单个口令填充后完整长度的辅助函数，将在 SIMDStringProcess 中调用
+ *					为维持代码一致性和逻辑严谨性，基本只是直接复制了基础 StringProcess 方法中的相应代码
+ * @param length 口令原长度（Byte）
+ * @return 最终字节数组长度（Byte）
+ */
 static int CalculatePadded(int length) {
 	int bitLength = length * 8;
 	int paddingBits = bitLength % 512;
@@ -94,11 +99,21 @@ static int CalculatePadded(int length) {
 	return paddedLength;
 }
 
-
+/**
+ * SIMDStringProcess: 将单个输入字符串转换成MD5计算所需的消息数组 -> *SIMD并行化版本*
+ * @param inputs 输入
+ * @param[out] n_byte 用于给调用者传递额外的返回值(1)，即各个口令最终 Byte 数组的长度
+ * @param guess_num 并行同时处理的口令个数
+ * @param[out] max_byte 用于给调用者传递额外的返回值(2)，即所有口令最终 Byte 数组长度中的最大值
+ * @return Byte 消息数组
+ */
 Byte *SIMDStringProcess(string *inputs, int *n_byte, int guess_num, int &max_byte)
 {
+	// maxPaddedLength：最大 Byte 数组长度
 	int maxPaddedLength = 0;
 	int *paddedLengths = new int[guess_num];
+
+	// 计算每个输入消息的 Byte 数组长度并找到最大值
 	for (int i = 0; i < guess_num; i++) {
 		paddedLengths[i] = CalculatePadded(inputs[i].length());
 		if (paddedLengths[i] > maxPaddedLength) {
@@ -106,49 +121,57 @@ Byte *SIMDStringProcess(string *inputs, int *n_byte, int guess_num, int &max_byt
 		}
 	}
 
-	// alignment
+	// paddedData：SIMD 优化所需的首地址对齐的整合内存块
+	// ALIGNMENT： NEON SIMD 向量指令处理数据的对齐要求是 *16 字节对齐*
+	// 已经求得所有消息中最大的 paddingByte 数组长度，根据这个长度进行内存对齐即可
 	constexpr int ALIGNMENT = 16;
 	Byte *paddedData = (Byte *)aligned_alloc(ALIGNMENT, maxPaddedLength * guess_num);
-	memset(paddedData, 0, maxPaddedLength * guess_num);
 
-	// parallel filling
+	// 依次对每个原始消息进行 padding
 	for (int i = 0; i < guess_num; i++) {
+		// 将输入的字符串转换为 Byte 为单位的数组
         Byte *blocks = (Byte *)inputs[i].c_str();
         int length = inputs[i].length();
         int paddedLength = paddedLengths[i];
+
+		// 根据当前索引到整合内存块中取当前消息的 Byte 数组对应的起始地址，步长为 maxPaddedLength
         Byte *paddedMessage = paddedData + i * maxPaddedLength;
 
-        // 复制原始数据
+        // 复制原始消息
         memcpy(paddedMessage, blocks, length);
 
-        // 添加 0x80 填充
-        paddedMessage[length] = 0x80;
+        // 添加填充字节。填充时，第一位为 1，后面的所有位均为 0。
+		// 所以第一个 byte是 0x80
+        paddedMessage[length] = 0x80;										// 添加一个 0x80 字节
+        memset(paddedMessage + length + 1, 0, paddedLength - length - 9);	// 填充 0 字节
 
-        // 清零中间填充区域
-        memset(paddedMessage + length + 1, 0, paddedLength - length - 9);
-
-        // 添加长度（小端序）
+        // 添加消息长度（64比特，小端格式）
         for (int i1 = 0; i1 < 8; ++i1)
 		{
-			// 特别注意此处应当将bitLength转换为uint64_t
-			// 这里的length是原始消息的长度
+			// 特别注意此处应当将 bitLength 转换为 uint64_t
+			// 这里的 length 是原始消息的长度
 			paddedMessage[paddedLength - 8 + i1] = ((uint64_t)length * 8 >> (i1 * 8)) & 0xFF;
 		}
 
+		// 验证长度是否满足要求。此时长度应当是 512bit 的倍数
 		int residual = 8 * paddedLength % 512;
 		assert(residual == 0);
     }
+	// 将函数局部变量赋给用于给调用者传递额外的返回值的变量
 	memcpy(n_byte, paddedLengths, guess_num * sizeof(int));
 	max_byte = maxPaddedLength;
+
+	// 善后操作
+	delete[] paddedLengths;
 	return paddedData;
 }
 
 
 /**
- * MD5Hash: 将单个输入字符串转换成MD5
+ * MD5Hash: 将单个输入字符串转换成 MD5
  * @param input 输入
- * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是MD5的结果
- * @return Byte消息数组
+ * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是 MD5 的结果
+ * @return Byte 消息数组
  */
 void MD5Hash(string input, bit32 *state)
 {
@@ -169,7 +192,7 @@ void MD5Hash(string input, bit32 *state)
 	state[2] = 0x98badcfe;
 	state[3] = 0x10325476;
 
-	// 逐block地更新state
+	// 逐 block 地更新 state
 	for (int i = 0; i < n_blocks; i += 1)
 	{
 		bit32 x[16];
@@ -274,7 +297,7 @@ void MD5Hash(string input, bit32 *state)
 				   ((value & 0xff000000) >> 24); // 将最高字节移到最低位
 	}
 
-	// 输出最终的hash结果
+	// 输出最终的 hash 结果
 	// for (int i1 = 0; i1 < 4; i1 += 1)
 	// {
 	// 	cout << std::setw(8) << std::setfill('0') << hex << state[i1];
@@ -282,34 +305,57 @@ void MD5Hash(string input, bit32 *state)
 	// cout << endl;
 
 	// 释放动态分配的内存
-	// 实现SIMD并行算法的时候，也请记得及时回收内存！
+	// 实现 SIMD 并行算法的时候，也请记得及时回收内存！
 	delete[] paddedMessage;
 	delete[] messageLength;
 }
 
+/**
+ * SIMDMD5Hash: 将*多个*输入字符串转换成 MD5 -> *SIMD并行化版本*
+ * @param inputs 输入
+ * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是MD5的结果
+ * @return Byte 消息数组
+ */
 void SIMDMD5Hash(string *inputs, bit32 *state)
 {
-	// parallel times = 4
+	// PARA_NUM：常数，设置并行度，即并行同时处理的消息个数
+	// 由于并行架构和指令的限制，一般默认是 4 且不改动
 	const int PARA_NUM = 4;
+
+	// messageLenths：记录各个消息的 Byte 数组长度
 	int *messageLengths = new int[PARA_NUM];
+
+	// maxByte：记录最大Byte数组长度
 	int maxByte = 0;
+
+	// 对所有消息进行初始化，获得整合 *16 字节对齐* 内存块
+	// 同时获取各个消息的 Byte 数组长度和最大 Byte 数组长度
 	Byte *paddedData = SIMDStringProcess(inputs, messageLengths, PARA_NUM, maxByte);
 
+	// 将各消息分为 n_blocks 个 512bit 的部分
 	int *n_blocks = new int[PARA_NUM];
 	for (int i = 0; i < PARA_NUM; i++) {
 		n_blocks[i] = messageLengths[i] / 64;
 	}
+
+	// maxBlocks：最长 Byte 数组对应的 512bit 部分数
+	// 这也是后面位处理所需的总循环轮数
 	const int maxBlocks = maxByte / 64;
 
-	// bit32* state= new bit32[4];
+	// 使用 NEON 的 vdupq_n_u32 指令
+	// 为 SIMD 并行 MD5 哈希计算 初始化 4 个 *并行* 的状态寄存器
 	uint32x4_t state_a = vdupq_n_u32(0x67452301);
     uint32x4_t state_b = vdupq_n_u32(0xefcdab89);
     uint32x4_t state_c = vdupq_n_u32(0x98badcfe);
     uint32x4_t state_d = vdupq_n_u32(0x10325476);
 
+	// 逐 block 地更新 state
 	for (int i = 0; i < maxBlocks; i += 1) {
+		// 将每个 block 再分为 4 Byte 大小的 M 块，用作后面多轮位运算的参数
+		// 同样使用 uint32x4_t 型，构造 4 个 32-bit 无符号整数的向量，满足并行化要求
 		uint32x4_t M[16];
 
+		// 逐次读取 block 再分解后的小块数据到 M 向量块中
 		for (int i1 = 0; i1 < 16; ++i1)
 		{
 			uint32_t temp_vec[4];
@@ -322,13 +368,21 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
 			M[i1] = vld1q_u32(temp_vec);
 		}
 
-		// mask code to judge if one still needs md5 ops
+		// maskArray：掩码数组
+		// activeMask：掩码向量
+		// 构造掩码的原因是，每个消息最终 Byte 数组的大小可能不同
+		// 如果该轮运算某一消息的 Byte 数组已经结束，若再对其进行位运算，最终可能会产生错误的 MD5
+		// 掩码记录当前消息是否还需要继续进行位运算（是否还有 Byte 数组剩余）：
+		// *是 ==> 0xFFFFFFFF*
+		// *否 ==> 0x00000000*
+		// 将在每个位运算函数内检查掩码，如果全为 0，对相应消息就不再进行该位运算
 		uint32_t maskArray[PARA_NUM];
 		for (int i1 = 0; i1 < PARA_NUM; ++i1) {
 			maskArray[i1] = (i < n_blocks[i1]) ? 0xFFFFFFFF : 0x00000000;
 		}
 		uint32x4_t activeMask = vld1q_u32(maskArray);
 
+		// 记录初始状态
 		uint32x4_t a = state_a, b = state_b, c = state_c, d = state_d;
 
 		auto start = system_clock::now();
@@ -404,28 +458,33 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
 		II_SIMD(c, d, a, b, M[2], s43, 0x2ad7d2bb, activeMask);
 		II_SIMD(b, c, d, a, M[9], s44, 0xeb86d391, activeMask);
 
+		// 使用 NEON 的 vaddq_u32 指令
+		// 依次加回各消息的位运算最终结果
 		state_a = vaddq_u32(state_a, a);
 		state_b = vaddq_u32(state_b, b);
 		state_c = vaddq_u32(state_c, c);
 		state_d = vaddq_u32(state_d, d);
 
 	}
+
 	// 保存最终结果
 	vst1q_u32(state + 0, state_a);
 	vst1q_u32(state + 4, state_b);
 	vst1q_u32(state + 8, state_c);
 	vst1q_u32(state + 12, state_d);
 
-	// get each password's MD5 code (every 4 'state's => 1 password MD5)
+	// 将小端转换为大端格式
+	// 最终 4*4 的 state被填满，每 4 个 state 代表一个 MD5，依次读取即可
 	for (int i = 0; i < 16; i++)
 	{
 		uint32_t value = state[i];
 		state[i] = ((value & 0xff) << 24) |		 // 将最低字节移到最高位
-				((value & 0xff00) << 8) |	 // 将次低字节左移
-				((value & 0xff0000) >> 8) |	 // 将次高字节右移
-				((value & 0xff000000) >> 24); // 将最高字节移到最低位
+					((value & 0xff00) << 8) |	 // 将次低字节左移
+					((value & 0xff0000) >> 8) |	 // 将次高字节右移
+					((value & 0xff000000) >> 24); // 将最高字节移到最低位
 	}
 
+	// 回收内存
 	delete[] paddedData;
 	delete[] messageLengths;
 	delete[] n_blocks;

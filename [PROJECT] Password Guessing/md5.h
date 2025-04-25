@@ -2,16 +2,16 @@
 #include <string>
 #include <cstring>
 
-#include <arm_neon.h>
+#include <arm_neon.h>   // 使用 NEON
 
 using namespace std;
 
-// 定义了Byte，便于使用
+// 定义了 Byte，便于使用
 typedef unsigned char Byte;
-// 定义了32比特
+// 定义了 32 比特
 typedef unsigned int bit32;
 
-// MD5的一系列参数。参数是固定的，其实你不需要看懂这些
+// MD5 的一系列参数。参数是固定的，其实你不需要看懂这些
 #define s11 7
 #define s12 12
 #define s13 17
@@ -36,16 +36,16 @@ typedef unsigned int bit32;
  *
  * @return one bit32.
  */
-// 定义了一系列MD5中的具体函数
-// 这四个计算函数是需要你进行SIMD并行化的
-// 可以看到，FGHI四个函数都涉及一系列位运算，在数据上是对齐的，非常容易实现SIMD的并行化
+// 定义了一系列 MD5 中的具体函数
+// 这四个计算函数是需要你进行 SIMD 并行化的
+// 可以看到，FGHI 四个函数都涉及一系列位运算，在数据上是对齐的，非常容易实现 SIMD 的并行化
 
 #define F(x, y, z) (((x) & (y)) | ((~x) & (z)))
 #define G(x, y, z) (((x) & (z)) | ((y) & (~z)))
 #define H(x, y, z) ((x) ^ (y) ^ (z))
 #define I(x, y, z) ((y) ^ ((x) | (~z)))
 
-// SIMD versions
+// *SIMD 版本 >>>
 #define F_SIMD(x, y, z) vorrq_u32(vandq_u32(x, y), vandq_u32(vmvnq_u32(x), z))
 #define G_SIMD(x, y, z) vorrq_u32(vandq_u32(x, z), vandq_u32(y, vmvnq_u32(z)))
 #define H_SIMD(x, y, z) veorq_u32(x, veorq_u32(y, z))
@@ -60,9 +60,9 @@ typedef unsigned int bit32;
  *
  * @return the number after rotated left.
  */
-// 定义了一系列MD5中的具体函数
-// 这五个计算函数（ROTATELEFT/FF/GG/HH/II）和之前的FGHI一样，都是需要你进行SIMD并行化的
-// 但是你需要注意的是#define的功能及其效果，可以发现这里的FGHI是没有返回值的，为什么呢？你可以查询#define的含义和用法
+// 定义了一系列 MD5 中的具体函数
+// 这五个计算函数（ROTATELEFT/FF/GG/HH/II）和之前的 FGHI 一样，都是需要你进行 SIMD 并行化的
+// 但是你需要注意的是 #define 的功能及其效果，可以发现这里的 FGHI 是没有返回值的，为什么呢？你可以查询 #define 的含义和用法
 #define ROTATELEFT(num, n) (((num) << (n)) | ((num) >> (32-(n))))
 
 #define FF(a, b, c, d, x, s, ac) { \
@@ -87,7 +87,7 @@ typedef unsigned int bit32;
   (a) += (b); \
 }
 
-// SIMD versions (mask judge included)
+// *SIMD 版本 (包含掩码判断) >>>
 #define ROTATELEFT_SIMD(num, n) \
     vorrq_u32(vshlq_n_u32((num), (n)), vshrq_n_u32((num), (32 - (n))))
 
