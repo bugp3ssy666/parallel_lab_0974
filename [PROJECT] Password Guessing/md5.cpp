@@ -311,12 +311,13 @@ void MD5Hash(string input, bit32 *state)
 }
 
 /**
- * SIMDMD5Hash: 将*多个*输入字符串转换成 MD5 -> *SIMD并行化版本*
+ * SIMDMD5Hash_4: 将*多个*输入字符串转换成 MD5 -> *SIMD并行化版本*
+ *				  --- 并行度 = 4
  * @param inputs 输入
  * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是MD5的结果
  * @return Byte 消息数组
  */
-void SIMDMD5Hash(string *inputs, bit32 *state)
+void SIMDMD5Hash_4(string *inputs, bit32 *state)
 {
 	// PARA_NUM：常数，设置并行度，即并行同时处理的消息个数
 	// 由于并行架构和指令的限制，一般默认是 4 且不改动
@@ -358,12 +359,12 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
 		// 逐次读取 block 再分解后的小块数据到 M 向量块中
 		for (int i1 = 0; i1 < 16; ++i1)
 		{
-			uint32_t temp_vec[4];
+			uint32_t temp_vec[4] = {0};
 			for (int i2 = 0; i2 < PARA_NUM; ++i2) {
 				temp_vec[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
-						   ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
-						   ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
-						   ((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
+						   	   ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
+						  	   ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
+						   	   ((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
 			}
 			M[i1] = vld1q_u32(temp_vec);
 		}
@@ -475,16 +476,569 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
 
 	// 将小端转换为大端格式
 	// 最终 4*4 的 state被填满，每 4 个 state 代表一个 MD5，依次读取即可
-	for (int i = 0; i < 16; i++)
+	for (int i = 0; i < 4 * PARA_NUM; i++)
 	{
 		uint32_t value = state[i];
 		state[i] = ((value & 0xff) << 24) |		 // 将最低字节移到最高位
-					((value & 0xff00) << 8) |	 // 将次低字节左移
-					((value & 0xff0000) >> 8) |	 // 将次高字节右移
-					((value & 0xff000000) >> 24); // 将最高字节移到最低位
+				   ((value & 0xff00) << 8) |	 // 将次低字节左移
+				   ((value & 0xff0000) >> 8) |	 // 将次高字节右移
+				   ((value & 0xff000000) >> 24); // 将最高字节移到最低位
 	}
 
 	// 回收内存
+	delete[] paddedData;
+	delete[] messageLengths;
+	delete[] n_blocks;
+}
+
+/**
+ * SIMDMD5Hash_2: 将*多个*输入字符串转换成 MD5 -> *SIMD并行化版本*（无注释）
+ *				  --- 并行度 = 2
+ * @param inputs 输入
+ * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是MD5的结果
+ * @return Byte 消息数组
+ */
+void SIMDMD5Hash_2(string *inputs, bit32 *state)
+{
+	const int PARA_NUM = 2;
+	int *messageLengths = new int[PARA_NUM];
+	int maxByte = 0;
+	Byte *paddedData = SIMDStringProcess(inputs, messageLengths, PARA_NUM, maxByte);
+	
+	int *n_blocks = new int[PARA_NUM];
+	for (int i = 0; i < PARA_NUM; i++) {
+		n_blocks[i] = messageLengths[i] / 64;
+	}
+	const int maxBlocks = maxByte / 64;
+
+	uint32x4_t state_a = vdupq_n_u32(0x67452301);
+    uint32x4_t state_b = vdupq_n_u32(0xefcdab89);
+    uint32x4_t state_c = vdupq_n_u32(0x98badcfe);
+    uint32x4_t state_d = vdupq_n_u32(0x10325476);
+
+	for (int i = 0; i < maxBlocks; i += 1) {
+		uint32x4_t M[16];
+
+		for (int i1 = 0; i1 < 16; ++i1)
+		{
+			uint32_t temp_vec[4] = {0};
+			for (int i2 = 0; i2 < PARA_NUM; ++i2) {
+				temp_vec[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
+						   	   ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
+						  	   ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
+						   	   ((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
+			}
+			M[i1] = vld1q_u32(temp_vec);
+		}
+
+		uint32_t maskArray[PARA_NUM];
+		for (int i1 = 0; i1 < PARA_NUM; ++i1) {
+			maskArray[i1] = (i < n_blocks[i1]) ? 0xFFFFFFFF : 0x00000000;
+		}
+		uint32x4_t activeMask = vld1q_u32(maskArray);
+
+		uint32x4_t a = state_a, b = state_b, c = state_c, d = state_d;
+
+		auto start = system_clock::now();
+
+		FF_SIMD(a, b, c, d, M[0], s11, 0xd76aa478, activeMask);
+		FF_SIMD(d, a, b, c, M[1], s12, 0xe8c7b756, activeMask);
+		FF_SIMD(c, d, a, b, M[2], s13, 0x242070db, activeMask);
+		FF_SIMD(b, c, d, a, M[3], s14, 0xc1bdceee, activeMask);
+		FF_SIMD(a, b, c, d, M[4], s11, 0xf57c0faf, activeMask);
+		FF_SIMD(d, a, b, c, M[5], s12, 0x4787c62a, activeMask);
+		FF_SIMD(c, d, a, b, M[6], s13, 0xa8304613, activeMask);
+		FF_SIMD(b, c, d, a, M[7], s14, 0xfd469501, activeMask);
+		FF_SIMD(a, b, c, d, M[8], s11, 0x698098d8, activeMask);
+		FF_SIMD(d, a, b, c, M[9], s12, 0x8b44f7af, activeMask);
+		FF_SIMD(c, d, a, b, M[10], s13, 0xffff5bb1, activeMask);
+		FF_SIMD(b, c, d, a, M[11], s14, 0x895cd7be, activeMask);
+		FF_SIMD(a, b, c, d, M[12], s11, 0x6b901122, activeMask);
+		FF_SIMD(d, a, b, c, M[13], s12, 0xfd987193, activeMask);
+		FF_SIMD(c, d, a, b, M[14], s13, 0xa679438e, activeMask);
+		FF_SIMD(b, c, d, a, M[15], s14, 0x49b40821, activeMask);
+
+		GG_SIMD(a, b, c, d, M[1], s21, 0xf61e2562, activeMask);
+		GG_SIMD(d, a, b, c, M[6], s22, 0xc040b340, activeMask);
+		GG_SIMD(c, d, a, b, M[11], s23, 0x265e5a51, activeMask);
+		GG_SIMD(b, c, d, a, M[0], s24, 0xe9b6c7aa, activeMask);
+		GG_SIMD(a, b, c, d, M[5], s21, 0xd62f105d, activeMask);
+		GG_SIMD(d, a, b, c, M[10], s22, 0x2441453, activeMask);
+		GG_SIMD(c, d, a, b, M[15], s23, 0xd8a1e681, activeMask);
+		GG_SIMD(b, c, d, a, M[4], s24, 0xe7d3fbc8, activeMask);
+		GG_SIMD(a, b, c, d, M[9], s21, 0x21e1cde6, activeMask);
+		GG_SIMD(d, a, b, c, M[14], s22, 0xc33707d6, activeMask);
+		GG_SIMD(c, d, a, b, M[3], s23, 0xf4d50d87, activeMask);
+		GG_SIMD(b, c, d, a, M[8], s24, 0x455a14ed, activeMask);
+		GG_SIMD(a, b, c, d, M[13], s21, 0xa9e3e905, activeMask);
+		GG_SIMD(d, a, b, c, M[2], s22, 0xfcefa3f8, activeMask);
+		GG_SIMD(c, d, a, b, M[7], s23, 0x676f02d9, activeMask);
+		GG_SIMD(b, c, d, a, M[12], s24, 0x8d2a4c8a, activeMask);
+
+		HH_SIMD(a, b, c, d, M[5], s31, 0xfffa3942, activeMask);
+		HH_SIMD(d, a, b, c, M[8], s32, 0x8771f681, activeMask);
+		HH_SIMD(c, d, a, b, M[11], s33, 0x6d9d6122, activeMask);
+		HH_SIMD(b, c, d, a, M[14], s34, 0xfde5380c, activeMask);
+		HH_SIMD(a, b, c, d, M[1], s31, 0xa4beea44, activeMask);
+		HH_SIMD(d, a, b, c, M[4], s32, 0x4bdecfa9, activeMask);
+		HH_SIMD(c, d, a, b, M[7], s33, 0xf6bb4b60, activeMask);
+		HH_SIMD(b, c, d, a, M[10], s34, 0xbebfbc70, activeMask);
+		HH_SIMD(a, b, c, d, M[13], s31, 0x289b7ec6, activeMask);
+		HH_SIMD(d, a, b, c, M[0], s32, 0xeaa127fa, activeMask);
+		HH_SIMD(c, d, a, b, M[3], s33, 0xd4ef3085, activeMask);
+		HH_SIMD(b, c, d, a, M[6], s34, 0x4881d05, activeMask);
+		HH_SIMD(a, b, c, d, M[9], s31, 0xd9d4d039, activeMask);
+		HH_SIMD(d, a, b, c, M[12], s32, 0xe6db99e5, activeMask);
+		HH_SIMD(c, d, a, b, M[15], s33, 0x1fa27cf8, activeMask);
+		HH_SIMD(b, c, d, a, M[2], s34, 0xc4ac5665, activeMask);
+
+		II_SIMD(a, b, c, d, M[0], s41, 0xf4292244, activeMask);
+		II_SIMD(d, a, b, c, M[7], s42, 0x432aff97, activeMask);
+		II_SIMD(c, d, a, b, M[14], s43, 0xab9423a7, activeMask);
+		II_SIMD(b, c, d, a, M[5], s44, 0xfc93a039, activeMask);
+		II_SIMD(a, b, c, d, M[12], s41, 0x655b59c3, activeMask);
+		II_SIMD(d, a, b, c, M[3], s42, 0x8f0ccc92, activeMask);
+		II_SIMD(c, d, a, b, M[10], s43, 0xffeff47d, activeMask);
+		II_SIMD(b, c, d, a, M[1], s44, 0x85845dd1, activeMask);
+		II_SIMD(a, b, c, d, M[8], s41, 0x6fa87e4f, activeMask);
+		II_SIMD(d, a, b, c, M[15], s42, 0xfe2ce6e0, activeMask);
+		II_SIMD(c, d, a, b, M[6], s43, 0xa3014314, activeMask);
+		II_SIMD(b, c, d, a, M[13], s44, 0x4e0811a1, activeMask);
+		II_SIMD(a, b, c, d, M[4], s41, 0xf7537e82, activeMask);
+		II_SIMD(d, a, b, c, M[11], s42, 0xbd3af235, activeMask);
+		II_SIMD(c, d, a, b, M[2], s43, 0x2ad7d2bb, activeMask);
+		II_SIMD(b, c, d, a, M[9], s44, 0xeb86d391, activeMask);
+
+		state_a = vaddq_u32(state_a, a);
+		state_b = vaddq_u32(state_b, b);
+		state_c = vaddq_u32(state_c, c);
+		state_d = vaddq_u32(state_d, d);
+
+	}
+	vst1q_u32(state + 0, state_a);
+	vst1q_u32(state + 4, state_b);
+	vst1q_u32(state + 8, state_c);
+	vst1q_u32(state + 12, state_d);
+
+	for (int i = 0; i < 4 * PARA_NUM; i++)
+	{
+		uint32_t value = state[i];
+		state[i] = ((value & 0xff) << 24) |	
+				   ((value & 0xff00) << 8) |
+				   ((value & 0xff0000) >> 8) |
+				   ((value & 0xff000000) >> 24); 
+	}
+
+	delete[] paddedData;
+	delete[] messageLengths;
+	delete[] n_blocks;
+}
+
+/**
+ * SIMDMD5Hash_8basic: 将*多个*输入字符串转换成 MD5 -> *SIMD并行化版本*（无注释）
+ *				  --- 并行度 = 8
+ * @param inputs 输入
+ * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是MD5的结果
+ * @return Byte 消息数组
+ */
+void SIMDMD5Hash_8basic(string *inputs, bit32 *state)
+{
+	const int PARA_NUM = 8;				// 8
+	int *messageLengths = new int[PARA_NUM];
+	int maxByte = 0;
+	Byte *paddedData = SIMDStringProcess(inputs, messageLengths, PARA_NUM, maxByte);
+	
+	int *n_blocks = new int[PARA_NUM];
+	for (int i = 0; i < PARA_NUM; i++) {
+		n_blocks[i] = messageLengths[i] / 64;
+	}
+	const int maxBlocks = maxByte / 64;
+
+	// (1)
+	uint32x4_t state_a_low = vdupq_n_u32(0x67452301), state_a_high = vdupq_n_u32(0x67452301);
+	uint32x4_t state_b_low = vdupq_n_u32(0xefcdab89), state_b_high = vdupq_n_u32(0xefcdab89);
+	uint32x4_t state_c_low = vdupq_n_u32(0x98badcfe), state_c_high = vdupq_n_u32(0x98badcfe);
+	uint32x4_t state_d_low = vdupq_n_u32(0x10325476), state_d_high = vdupq_n_u32(0x10325476);
+
+	for (int i = 0; i < maxBlocks; i += 1) {
+		// (2)
+		uint32x4_t M_low[16], M_high[16];
+
+		for (int i1 = 0; i1 < 16; ++i1)
+		{
+			// (3)
+			uint32_t temp_vec_low[4] = {0}, temp_vec_high[4] = {0};
+			for (int i2 = 0; i2 < PARA_NUM/2; ++i2) {
+				temp_vec_low[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
+							   	   ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
+							   	   ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
+							   	   ((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
+			}
+			for (int i2 = PARA_NUM/2; i2 < PARA_NUM; ++i2) {
+				temp_vec_high[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
+							   	    ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
+							   	    ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
+							   	   	((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
+			}
+			M_low[i1] = vld1q_u32(temp_vec_low);
+            M_high[i1] = vld1q_u32(temp_vec_high);
+		}
+
+		// (4)
+		uint32_t maskArray_low[4], maskArray_high[4];
+		for (int i1 = 0; i1 < PARA_NUM/2; ++i1) {
+			maskArray_low[i1] = (i < n_blocks[i1]) ? 0xFFFFFFFF : 0x00000000;
+			maskArray_high[i1] = (i < n_blocks[i1 + 4]) ? 0xFFFFFFFF : 0x00000000;
+		}
+        uint32x4_t activeMask_low = vld1q_u32(maskArray_low);
+        uint32x4_t activeMask_high = vld1q_u32(maskArray_high);
+
+		// (5)
+		uint32x4_t a_low = state_a_low, a_high = state_a_high,
+				   b_low = state_b_low, b_high = state_b_high,
+				   c_low = state_c_low, c_high = state_c_high,
+				   d_low = state_d_low, d_high = state_d_high;
+
+		auto start = system_clock::now();
+
+		FF_SIMD(a_low, b_low, c_low, d_low, M_low[0], s11, 0xd76aa478, activeMask_low);
+		FF_SIMD(a_high, b_high, c_high, d_high, M_high[0], s11, 0xd76aa478, activeMask_high);
+		FF_SIMD(d_low, a_low, b_low, c_low, M_low[1], s12, 0xe8c7b756, activeMask_low);
+		FF_SIMD(d_high, a_high, b_high, c_high, M_high[1], s12, 0xe8c7b756, activeMask_high);
+		FF_SIMD(c_low, d_low, a_low, b_low, M_low[2], s13, 0x242070db, activeMask_low);
+		FF_SIMD(c_high, d_high, a_high, b_high, M_high[2], s13, 0x242070db, activeMask_high);
+		FF_SIMD(b_low, c_low, d_low, a_low, M_low[3], s14, 0xc1bdceee, activeMask_low);
+		FF_SIMD(b_high, c_high, d_high, a_high, M_high[3], s14, 0xc1bdceee, activeMask_high);
+		FF_SIMD(a_low, b_low, c_low, d_low, M_low[4], s11, 0xf57c0faf, activeMask_low);
+		FF_SIMD(a_high, b_high, c_high, d_high, M_high[4], s11, 0xf57c0faf, activeMask_high);
+		FF_SIMD(d_low, a_low, b_low, c_low, M_low[5], s12, 0x4787c62a, activeMask_low);
+		FF_SIMD(d_high, a_high, b_high, c_high, M_high[5], s12, 0x4787c62a, activeMask_high);
+		FF_SIMD(c_low, d_low, a_low, b_low, M_low[6], s13, 0xa8304613, activeMask_low);
+		FF_SIMD(c_high, d_high, a_high, b_high, M_high[6], s13, 0xa8304613, activeMask_high);
+		FF_SIMD(b_low, c_low, d_low, a_low, M_low[7], s14, 0xfd469501, activeMask_low);
+		FF_SIMD(b_high, c_high, d_high, a_high, M_high[7], s14, 0xfd469501, activeMask_high);
+		FF_SIMD(a_low, b_low, c_low, d_low, M_low[8], s11, 0x698098d8, activeMask_low);
+		FF_SIMD(a_high, b_high, c_high, d_high, M_high[8], s11, 0x698098d8, activeMask_high);
+		FF_SIMD(d_low, a_low, b_low, c_low, M_low[9], s12, 0x8b44f7af, activeMask_low);
+		FF_SIMD(d_high, a_high, b_high, c_high, M_high[9], s12, 0x8b44f7af, activeMask_high);
+		FF_SIMD(c_low, d_low, a_low, b_low, M_low[10], s13, 0xffff5bb1, activeMask_low);
+		FF_SIMD(c_high, d_high, a_high, b_high, M_high[10], s13, 0xffff5bb1, activeMask_high);
+		FF_SIMD(b_low, c_low, d_low, a_low, M_low[11], s14, 0x895cd7be, activeMask_low);
+		FF_SIMD(b_high, c_high, d_high, a_high, M_high[11], s14, 0x895cd7be, activeMask_high);
+		FF_SIMD(a_low, b_low, c_low, d_low, M_low[12], s11, 0x6b901122, activeMask_low);
+		FF_SIMD(a_high, b_high, c_high, d_high, M_high[12], s11, 0x6b901122, activeMask_high);
+		FF_SIMD(d_low, a_low, b_low, c_low, M_low[13], s12, 0xfd987193, activeMask_low);
+		FF_SIMD(d_high, a_high, b_high, c_high, M_high[13], s12, 0xfd987193, activeMask_high);
+		FF_SIMD(c_low, d_low, a_low, b_low, M_low[14], s13, 0xa679438e, activeMask_low);
+		FF_SIMD(c_high, d_high, a_high, b_high, M_high[14], s13, 0xa679438e, activeMask_high);
+		FF_SIMD(b_low, c_low, d_low, a_low, M_low[15], s14, 0x49b40821, activeMask_low);
+		FF_SIMD(b_high, c_high, d_high, a_high, M_high[15], s14, 0x49b40821, activeMask_high);
+
+		GG_SIMD(a_low, b_low, c_low, d_low, M_low[1], s21, 0xf61e2562, activeMask_low);
+		GG_SIMD(a_high, b_high, c_high, d_high, M_high[1], s21, 0xf61e2562, activeMask_high);
+		GG_SIMD(d_low, a_low, b_low, c_low, M_low[6], s22, 0xc040b340, activeMask_low);
+		GG_SIMD(d_high, a_high, b_high, c_high, M_high[6], s22, 0xc040b340, activeMask_high);
+		GG_SIMD(c_low, d_low, a_low, b_low, M_low[11], s23, 0x265e5a51, activeMask_low);
+		GG_SIMD(c_high, d_high, a_high, b_high, M_high[11], s23, 0x265e5a51, activeMask_high);
+		GG_SIMD(b_low, c_low, d_low, a_low, M_low[0], s24, 0xe9b6c7aa, activeMask_low);
+		GG_SIMD(b_high, c_high, d_high, a_high, M_high[0], s24, 0xe9b6c7aa, activeMask_high);
+		GG_SIMD(a_low, b_low, c_low, d_low, M_low[5], s21, 0xd62f105d, activeMask_low);
+		GG_SIMD(a_high, b_high, c_high, d_high, M_high[5], s21, 0xd62f105d, activeMask_high);
+		GG_SIMD(d_low, a_low, b_low, c_low, M_low[10], s22, 0x2441453, activeMask_low);
+		GG_SIMD(d_high, a_high, b_high, c_high, M_high[10], s22, 0x2441453, activeMask_high);
+		GG_SIMD(c_low, d_low, a_low, b_low, M_low[15], s23, 0xd8a1e681, activeMask_low);
+		GG_SIMD(c_high, d_high, a_high, b_high, M_high[15], s23, 0xd8a1e681, activeMask_high);
+		GG_SIMD(b_low, c_low, d_low, a_low, M_low[4], s24, 0xe7d3fbc8, activeMask_low);
+		GG_SIMD(b_high, c_high, d_high, a_high, M_high[4], s24, 0xe7d3fbc8, activeMask_high);
+		GG_SIMD(a_low, b_low, c_low, d_low, M_low[9], s21, 0x21e1cde6, activeMask_low);
+		GG_SIMD(a_high, b_high, c_high, d_high, M_high[9], s21, 0x21e1cde6, activeMask_high);
+		GG_SIMD(d_low, a_low, b_low, c_low, M_low[14], s22, 0xc33707d6, activeMask_low);
+		GG_SIMD(d_high, a_high, b_high, c_high, M_high[14], s22, 0xc33707d6, activeMask_high);
+		GG_SIMD(c_low, d_low, a_low, b_low, M_low[3], s23, 0xf4d50d87, activeMask_low);
+		GG_SIMD(c_high, d_high, a_high, b_high, M_high[3], s23, 0xf4d50d87, activeMask_high);
+		GG_SIMD(b_low, c_low, d_low, a_low, M_low[8], s24, 0x455a14ed, activeMask_low);
+		GG_SIMD(b_high, c_high, d_high, a_high, M_high[8], s24, 0x455a14ed, activeMask_high);
+		GG_SIMD(a_low, b_low, c_low, d_low, M_low[13], s21, 0xa9e3e905, activeMask_low);
+		GG_SIMD(a_high, b_high, c_high, d_high, M_high[13], s21, 0xa9e3e905, activeMask_high);
+		GG_SIMD(d_low, a_low, b_low, c_low, M_low[2], s22, 0xfcefa3f8, activeMask_low);
+		GG_SIMD(d_high, a_high, b_high, c_high, M_high[2], s22, 0xfcefa3f8, activeMask_high);
+		GG_SIMD(c_low, d_low, a_low, b_low, M_low[7], s23, 0x676f02d9, activeMask_low);
+		GG_SIMD(c_high, d_high, a_high, b_high, M_high[7], s23, 0x676f02d9, activeMask_high);
+		GG_SIMD(b_low, c_low, d_low, a_low, M_low[12], s24, 0x8d2a4c8a, activeMask_low);
+		GG_SIMD(b_high, c_high, d_high, a_high, M_high[12], s24, 0x8d2a4c8a, activeMask_high);
+
+		HH_SIMD(a_low, b_low, c_low, d_low, M_low[5], s31, 0xfffa3942, activeMask_low);
+		HH_SIMD(a_high, b_high, c_high, d_high, M_high[5], s31, 0xfffa3942, activeMask_high);
+		HH_SIMD(d_low, a_low, b_low, c_low, M_low[8], s32, 0x8771f681, activeMask_low);
+		HH_SIMD(d_high, a_high, b_high, c_high, M_high[8], s32, 0x8771f681, activeMask_high);
+		HH_SIMD(c_low, d_low, a_low, b_low, M_low[11], s33, 0x6d9d6122, activeMask_low);
+		HH_SIMD(c_high, d_high, a_high, b_high, M_high[11], s33, 0x6d9d6122, activeMask_high);
+		HH_SIMD(b_low, c_low, d_low, a_low, M_low[14], s34, 0xfde5380c, activeMask_low);
+		HH_SIMD(b_high, c_high, d_high, a_high, M_high[14], s34, 0xfde5380c, activeMask_high);
+		HH_SIMD(a_low, b_low, c_low, d_low, M_low[1], s31, 0xa4beea44, activeMask_low);
+		HH_SIMD(a_high, b_high, c_high, d_high, M_high[1], s31, 0xa4beea44, activeMask_high);
+		HH_SIMD(d_low, a_low, b_low, c_low, M_low[4], s32, 0x4bdecfa9, activeMask_low);
+		HH_SIMD(d_high, a_high, b_high, c_high, M_high[4], s32, 0x4bdecfa9, activeMask_high);
+		HH_SIMD(c_low, d_low, a_low, b_low, M_low[7], s33, 0xf6bb4b60, activeMask_low);
+		HH_SIMD(c_high, d_high, a_high, b_high, M_high[7], s33, 0xf6bb4b60, activeMask_high);
+		HH_SIMD(b_low, c_low, d_low, a_low, M_low[10], s34, 0xbebfbc70, activeMask_low);
+		HH_SIMD(b_high, c_high, d_high, a_high, M_high[10], s34, 0xbebfbc70, activeMask_high);
+		HH_SIMD(a_low, b_low, c_low, d_low, M_low[13], s31, 0x289b7ec6, activeMask_low);
+		HH_SIMD(a_high, b_high, c_high, d_high, M_high[13], s31, 0x289b7ec6, activeMask_high);
+		HH_SIMD(d_low, a_low, b_low, c_low, M_low[0], s32, 0xeaa127fa, activeMask_low);
+		HH_SIMD(d_high, a_high, b_high, c_high, M_high[0], s32, 0xeaa127fa, activeMask_high);
+		HH_SIMD(c_low, d_low, a_low, b_low, M_low[3], s33, 0xd4ef3085, activeMask_low);
+		HH_SIMD(c_high, d_high, a_high, b_high, M_high[3], s33, 0xd4ef3085, activeMask_high);
+		HH_SIMD(b_low, c_low, d_low, a_low, M_low[6], s34, 0x4881d05, activeMask_low);
+		HH_SIMD(b_high, c_high, d_high, a_high, M_high[6], s34, 0x4881d05, activeMask_high);
+		HH_SIMD(a_low, b_low, c_low, d_low, M_low[9], s31, 0xd9d4d039, activeMask_low);
+		HH_SIMD(a_high, b_high, c_high, d_high, M_high[9], s31, 0xd9d4d039, activeMask_high);
+		HH_SIMD(d_low, a_low, b_low, c_low, M_low[12], s32, 0xe6db99e5, activeMask_low);
+		HH_SIMD(d_high, a_high, b_high, c_high, M_high[12], s32, 0xe6db99e5, activeMask_high);
+		HH_SIMD(c_low, d_low, a_low, b_low, M_low[15], s33, 0x1fa27cf8, activeMask_low);
+		HH_SIMD(c_high, d_high, a_high, b_high, M_high[15], s33, 0x1fa27cf8, activeMask_high);
+		HH_SIMD(b_low, c_low, d_low, a_low, M_low[2], s34, 0xc4ac5665, activeMask_low);
+		HH_SIMD(b_high, c_high, d_high, a_high, M_high[2], s34, 0xc4ac5665, activeMask_high);
+
+		II_SIMD(a_low, b_low, c_low, d_low, M_low[0], s41, 0xf4292244, activeMask_low);
+		II_SIMD(a_high, b_high, c_high, d_high, M_high[0], s41, 0xf4292244, activeMask_high);
+		II_SIMD(d_low, a_low, b_low, c_low, M_low[7], s42, 0x432aff97, activeMask_low);
+		II_SIMD(d_high, a_high, b_high, c_high, M_high[7], s42, 0x432aff97, activeMask_high);
+		II_SIMD(c_low, d_low, a_low, b_low, M_low[14], s43, 0xab9423a7, activeMask_low);
+		II_SIMD(c_high, d_high, a_high, b_high, M_high[14], s43, 0xab9423a7, activeMask_high);
+		II_SIMD(b_low, c_low, d_low, a_low, M_low[5], s44, 0xfc93a039, activeMask_low);
+		II_SIMD(b_high, c_high, d_high, a_high, M_high[5], s44, 0xfc93a039, activeMask_high);
+		II_SIMD(a_low, b_low, c_low, d_low, M_low[12], s41, 0x655b59c3, activeMask_low);
+		II_SIMD(a_high, b_high, c_high, d_high, M_high[12], s41, 0x655b59c3, activeMask_high);
+		II_SIMD(d_low, a_low, b_low, c_low, M_low[3], s42, 0x8f0ccc92, activeMask_low);
+		II_SIMD(d_high, a_high, b_high, c_high, M_high[3], s42, 0x8f0ccc92, activeMask_high);
+		II_SIMD(c_low, d_low, a_low, b_low, M_low[10], s43, 0xffeff47d, activeMask_low);
+		II_SIMD(c_high, d_high, a_high, b_high, M_high[10], s43, 0xffeff47d, activeMask_high);
+		II_SIMD(b_low, c_low, d_low, a_low, M_low[1], s44, 0x85845dd1, activeMask_low);
+		II_SIMD(b_high, c_high, d_high, a_high, M_high[1], s44, 0x85845dd1, activeMask_high);
+		II_SIMD(a_low, b_low, c_low, d_low, M_low[8], s41, 0x6fa87e4f, activeMask_low);
+		II_SIMD(a_high, b_high, c_high, d_high, M_high[8], s41, 0x6fa87e4f, activeMask_high);
+		II_SIMD(d_low, a_low, b_low, c_low, M_low[15], s42, 0xfe2ce6e0, activeMask_low);
+		II_SIMD(d_high, a_high, b_high, c_high, M_high[15], s42, 0xfe2ce6e0, activeMask_high);
+		II_SIMD(c_low, d_low, a_low, b_low, M_low[6], s43, 0xa3014314, activeMask_low);
+		II_SIMD(c_high, d_high, a_high, b_high, M_high[6], s43, 0xa3014314, activeMask_high);
+		II_SIMD(b_low, c_low, d_low, a_low, M_low[13], s44, 0x4e0811a1, activeMask_low);
+		II_SIMD(b_high, c_high, d_high, a_high, M_high[13], s44, 0x4e0811a1, activeMask_high);
+		II_SIMD(a_low, b_low, c_low, d_low, M_low[4], s41, 0xf7537e82, activeMask_low);
+		II_SIMD(a_high, b_high, c_high, d_high, M_high[4], s41, 0xf7537e82, activeMask_high);
+		II_SIMD(d_low, a_low, b_low, c_low, M_low[11], s42, 0xbd3af235, activeMask_low);
+		II_SIMD(d_high, a_high, b_high, c_high, M_high[11], s42, 0xbd3af235, activeMask_high);
+		II_SIMD(c_low, d_low, a_low, b_low, M_low[2], s43, 0x2ad7d2bb, activeMask_low);
+		II_SIMD(c_high, d_high, a_high, b_high, M_high[2], s43, 0x2ad7d2bb, activeMask_high);
+		II_SIMD(b_low, c_low, d_low, a_low, M_low[9], s44, 0xeb86d391, activeMask_low);
+		II_SIMD(b_high, c_high, d_high, a_high, M_high[9], s44, 0xeb86d391, activeMask_high);
+
+		// (6)
+		state_a_low = vaddq_u32(state_a_low, a_low);
+        state_a_high = vaddq_u32(state_a_high, a_high);
+        state_b_low = vaddq_u32(state_b_low, b_low);
+        state_b_high = vaddq_u32(state_b_high, b_high);
+        state_c_low = vaddq_u32(state_c_low, c_low);
+        state_c_high = vaddq_u32(state_c_high, c_high);
+        state_d_low = vaddq_u32(state_d_low, d_low);
+        state_d_high = vaddq_u32(state_d_high, d_high);
+
+	}
+	// (7)
+	vst1q_u32(state + 0, state_a_low);
+    vst1q_u32(state + 4, state_a_high);
+    vst1q_u32(state + 8, state_b_low);
+    vst1q_u32(state + 12, state_b_high);
+    vst1q_u32(state + 16, state_c_low);
+    vst1q_u32(state + 20, state_c_high);
+    vst1q_u32(state + 24, state_d_low);
+    vst1q_u32(state + 28, state_d_high);
+
+	for (int i = 0; i < 4 * PARA_NUM; i++)
+	{
+		uint32_t value = state[i];
+		state[i] = ((value & 0xff) << 24) |	
+				   ((value & 0xff00) << 8) |
+			 	   ((value & 0xff0000) >> 8) |
+				   ((value & 0xff000000) >> 24); 
+	}
+
+	delete[] paddedData;
+	delete[] messageLengths;
+	delete[] n_blocks;
+}
+
+/**
+ * SIMDMD5Hash_8advanced: 将*多个*输入字符串转换成 MD5 -> *SIMD并行化版本*（无注释）
+ *				  --- 并行度 = 8
+ * @param inputs 输入
+ * @param[out] state 用于给调用者传递额外的返回值，即最终的缓冲区，也就是MD5的结果
+ * @return Byte 消息数组
+ */
+void SIMDMD5Hash_8advanced(string *inputs, bit32 *state)
+{
+	const int PARA_NUM = 8;				// 8
+	int *messageLengths = new int[PARA_NUM];
+	int maxByte = 0;
+	Byte *paddedData = SIMDStringProcess(inputs, messageLengths, PARA_NUM, maxByte);
+	
+	int *n_blocks = new int[PARA_NUM];
+	for (int i = 0; i < PARA_NUM; i++) {
+		n_blocks[i] = messageLengths[i] / 64;
+	}
+	const int maxBlocks = maxByte / 64;
+
+	// (1)
+	uint32x4x2_t state_a, state_b, state_c, state_d;
+	state_a.val[0] = vdupq_n_u32(0x67452301);
+	state_a.val[1] = vdupq_n_u32(0x67452301);
+	state_b.val[0] = vdupq_n_u32(0xefcdab89);
+	state_b.val[1] = vdupq_n_u32(0xefcdab89);
+	state_c.val[0] = vdupq_n_u32(0x98badcfe);
+	state_c.val[1] = vdupq_n_u32(0x98badcfe);
+	state_d.val[0] = vdupq_n_u32(0x10325476);
+	state_d.val[1] = vdupq_n_u32(0x10325476);
+
+	for (int i = 0; i < maxBlocks; i += 1) {
+		// (2)
+		uint32x4x2_t M[16];
+
+		for (int i1 = 0; i1 < 16; ++i1)
+		{
+			// (3)
+			uint32_t temp_vec_low[4] = {0}, temp_vec_high[4] = {0};
+			for (int i2 = 0; i2 < PARA_NUM/2; ++i2) {
+				temp_vec_low[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
+								   ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
+								   ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
+								   ((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
+			}
+			for (int i2 = PARA_NUM/2; i2 < PARA_NUM; ++i2) {
+				temp_vec_high[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
+									((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
+									((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
+									((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
+			}
+			M[i1].val[0] = vld1q_u32(temp_vec_low);
+			M[i1].val[1] = vld1q_u32(temp_vec_high);
+		}
+
+		// (4)
+		uint32_t maskArray_low[4], maskArray_high[4];
+		for (int i1 = 0; i1 < PARA_NUM/2; ++i1) {
+			maskArray_low[i1] = (i < n_blocks[i1]) ? 0xFFFFFFFF : 0x00000000;
+			maskArray_high[i1] = (i < n_blocks[i1 + 4]) ? 0xFFFFFFFF : 0x00000000;
+		}
+		uint32x4x2_t activeMask;
+		activeMask.val[0] = vld1q_u32(maskArray_low);
+		activeMask.val[1] = vld1q_u32(maskArray_high);
+
+		// (5)
+		uint32x4x2_t a = state_a, b = state_b, c = state_c, d = state_d;
+
+		auto start = system_clock::now();
+
+        /* Round 1 */
+        FF_SIMD_8advanced(a, b, c, d, M[0], s11, 0xd76aa478, activeMask);
+        FF_SIMD_8advanced(d, a, b, c, M[1], s12, 0xe8c7b756, activeMask);
+        FF_SIMD_8advanced(c, d, a, b, M[2], s13, 0x242070db, activeMask);
+        FF_SIMD_8advanced(b, c, d, a, M[3], s14, 0xc1bdceee, activeMask);
+        FF_SIMD_8advanced(a, b, c, d, M[4], s11, 0xf57c0faf, activeMask);
+        FF_SIMD_8advanced(d, a, b, c, M[5], s12, 0x4787c62a, activeMask);
+        FF_SIMD_8advanced(c, d, a, b, M[6], s13, 0xa8304613, activeMask);
+        FF_SIMD_8advanced(b, c, d, a, M[7], s14, 0xfd469501, activeMask);
+        FF_SIMD_8advanced(a, b, c, d, M[8], s11, 0x698098d8, activeMask);
+        FF_SIMD_8advanced(d, a, b, c, M[9], s12, 0x8b44f7af, activeMask);
+        FF_SIMD_8advanced(c, d, a, b, M[10], s13, 0xffff5bb1, activeMask);
+        FF_SIMD_8advanced(b, c, d, a, M[11], s14, 0x895cd7be, activeMask);
+        FF_SIMD_8advanced(a, b, c, d, M[12], s11, 0x6b901122, activeMask);
+        FF_SIMD_8advanced(d, a, b, c, M[13], s12, 0xfd987193, activeMask);
+        FF_SIMD_8advanced(c, d, a, b, M[14], s13, 0xa679438e, activeMask);
+        FF_SIMD_8advanced(b, c, d, a, M[15], s14, 0x49b40821, activeMask);
+
+        /* Round 2 */
+        GG_SIMD_8advanced(a, b, c, d, M[1], s21, 0xf61e2562, activeMask);
+        GG_SIMD_8advanced(d, a, b, c, M[6], s22, 0xc040b340, activeMask);
+        GG_SIMD_8advanced(c, d, a, b, M[11], s23, 0x265e5a51, activeMask);
+        GG_SIMD_8advanced(b, c, d, a, M[0], s24, 0xe9b6c7aa, activeMask);
+        GG_SIMD_8advanced(a, b, c, d, M[5], s21, 0xd62f105d, activeMask);
+        GG_SIMD_8advanced(d, a, b, c, M[10], s22, 0x2441453, activeMask);
+        GG_SIMD_8advanced(c, d, a, b, M[15], s23, 0xd8a1e681, activeMask);
+        GG_SIMD_8advanced(b, c, d, a, M[4], s24, 0xe7d3fbc8, activeMask);
+        GG_SIMD_8advanced(a, b, c, d, M[9], s21, 0x21e1cde6, activeMask);
+        GG_SIMD_8advanced(d, a, b, c, M[14], s22, 0xc33707d6, activeMask);
+        GG_SIMD_8advanced(c, d, a, b, M[3], s23, 0xf4d50d87, activeMask);
+        GG_SIMD_8advanced(b, c, d, a, M[8], s24, 0x455a14ed, activeMask);
+        GG_SIMD_8advanced(a, b, c, d, M[13], s21, 0xa9e3e905, activeMask);
+        GG_SIMD_8advanced(d, a, b, c, M[2], s22, 0xfcefa3f8, activeMask);
+        GG_SIMD_8advanced(c, d, a, b, M[7], s23, 0x676f02d9, activeMask);
+        GG_SIMD_8advanced(b, c, d, a, M[12], s24, 0x8d2a4c8a, activeMask);
+
+        /* Round 3 */
+        HH_SIMD_8advanced(a, b, c, d, M[5], s31, 0xfffa3942, activeMask);
+        HH_SIMD_8advanced(d, a, b, c, M[8], s32, 0x8771f681, activeMask);
+        HH_SIMD_8advanced(c, d, a, b, M[11], s33, 0x6d9d6122, activeMask);
+        HH_SIMD_8advanced(b, c, d, a, M[14], s34, 0xfde5380c, activeMask);
+        HH_SIMD_8advanced(a, b, c, d, M[1], s31, 0xa4beea44, activeMask);
+        HH_SIMD_8advanced(d, a, b, c, M[4], s32, 0x4bdecfa9, activeMask);
+        HH_SIMD_8advanced(c, d, a, b, M[7], s33, 0xf6bb4b60, activeMask);
+        HH_SIMD_8advanced(b, c, d, a, M[10], s34, 0xbebfbc70, activeMask);
+        HH_SIMD_8advanced(a, b, c, d, M[13], s31, 0x289b7ec6, activeMask);
+        HH_SIMD_8advanced(d, a, b, c, M[0], s32, 0xeaa127fa, activeMask);
+        HH_SIMD_8advanced(c, d, a, b, M[3], s33, 0xd4ef3085, activeMask);
+        HH_SIMD_8advanced(b, c, d, a, M[6], s34, 0x4881d05, activeMask);
+        HH_SIMD_8advanced(a, b, c, d, M[9], s31, 0xd9d4d039, activeMask);
+        HH_SIMD_8advanced(d, a, b, c, M[12], s32, 0xe6db99e5, activeMask);
+        HH_SIMD_8advanced(c, d, a, b, M[15], s33, 0x1fa27cf8, activeMask);
+        HH_SIMD_8advanced(b, c, d, a, M[2], s34, 0xc4ac5665, activeMask);
+
+        /* Round 4 */
+        II_SIMD_8advanced(a, b, c, d, M[0], s41, 0xf4292244, activeMask);
+        II_SIMD_8advanced(d, a, b, c, M[7], s42, 0x432aff97, activeMask);
+        II_SIMD_8advanced(c, d, a, b, M[14], s43, 0xab9423a7, activeMask);
+        II_SIMD_8advanced(b, c, d, a, M[5], s44, 0xfc93a039, activeMask);
+        II_SIMD_8advanced(a, b, c, d, M[12], s41, 0x655b59c3, activeMask);
+        II_SIMD_8advanced(d, a, b, c, M[3], s42, 0x8f0ccc92, activeMask);
+        II_SIMD_8advanced(c, d, a, b, M[10], s43, 0xffeff47d, activeMask);
+        II_SIMD_8advanced(b, c, d, a, M[1], s44, 0x85845dd1, activeMask);
+        II_SIMD_8advanced(a, b, c, d, M[8], s41, 0x6fa87e4f, activeMask);
+        II_SIMD_8advanced(d, a, b, c, M[15], s42, 0xfe2ce6e0, activeMask);
+        II_SIMD_8advanced(c, d, a, b, M[6], s43, 0xa3014314, activeMask);
+        II_SIMD_8advanced(b, c, d, a, M[13], s44, 0x4e0811a1, activeMask);
+        II_SIMD_8advanced(a, b, c, d, M[4], s41, 0xf7537e82, activeMask);
+        II_SIMD_8advanced(d, a, b, c, M[11], s42, 0xbd3af235, activeMask);
+        II_SIMD_8advanced(c, d, a, b, M[2], s43, 0x2ad7d2bb, activeMask);
+        II_SIMD_8advanced(b, c, d, a, M[9], s44, 0xeb86d391, activeMask);
+
+		// (6)
+        state_a.val[0] = vaddq_u32(state_a.val[0], a.val[0]);
+        state_a.val[1] = vaddq_u32(state_a.val[1], a.val[1]);
+        state_b.val[0] = vaddq_u32(state_b.val[0], b.val[0]);
+        state_b.val[1] = vaddq_u32(state_b.val[1], b.val[1]);
+        state_c.val[0] = vaddq_u32(state_c.val[0], c.val[0]);
+        state_c.val[1] = vaddq_u32(state_c.val[1], c.val[1]);
+        state_d.val[0] = vaddq_u32(state_d.val[0], d.val[0]);
+        state_d.val[1] = vaddq_u32(state_d.val[1], d.val[1]);
+	}
+	// (7)
+    vst1q_u32(state + 0, state_a.val[0]);
+    vst1q_u32(state + 4, state_a.val[1]);
+    vst1q_u32(state + 8, state_b.val[0]);
+    vst1q_u32(state + 12, state_b.val[1]);
+    vst1q_u32(state + 16, state_c.val[0]);
+    vst1q_u32(state + 20, state_c.val[1]);
+    vst1q_u32(state + 24, state_d.val[0]);
+    vst1q_u32(state + 28, state_d.val[1]);
+
+	for (int i = 0; i < 4 * PARA_NUM; i++)
+	{
+		uint32_t value = state[i];
+		state[i] = ((value & 0xff) << 24) |	
+				((value & 0xff00) << 8) |
+					((value & 0xff0000) >> 8) |
+				((value & 0xff000000) >> 24); 
+	}
+
 	delete[] paddedData;
 	delete[] messageLengths;
 	delete[] n_blocks;

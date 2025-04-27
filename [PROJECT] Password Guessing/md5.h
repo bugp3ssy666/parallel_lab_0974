@@ -92,33 +92,102 @@ typedef unsigned int bit32;
     vorrq_u32(vshlq_n_u32((num), (n)), vshrq_n_u32((num), (32 - (n))))
 
 #define FF_SIMD(a, b, c, d, x, s, ac, mask) { \
-  if (vmaxvq_u32(mask)) { \
-    a = vaddq_u32(a, vaddq_u32(F_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
-    a = vaddq_u32(ROTATELEFT_SIMD(a, s), b); \
-  }\
+  uint32x4_t tmp = vaddq_u32(a, vaddq_u32(F_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
+  tmp = vaddq_u32(ROTATELEFT_SIMD(tmp, s), b); \
+  a = vbslq_u32(mask, tmp, a); \
 }
 
 #define GG_SIMD(a, b, c, d, x, s, ac, mask) { \
-  if (vmaxvq_u32(mask)) { \
-    a = vaddq_u32(a, vaddq_u32(G_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
-    a = vaddq_u32(ROTATELEFT_SIMD(a, s), b); \
-  }\
+  uint32x4_t tmp = vaddq_u32(a, vaddq_u32(G_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
+  tmp = vaddq_u32(ROTATELEFT_SIMD(tmp, s), b); \
+  a = vbslq_u32(mask, tmp, a); \
 }
 
 #define HH_SIMD(a, b, c, d, x, s, ac, mask) { \
-  if (vmaxvq_u32(mask)) { \
-    a = vaddq_u32(a, vaddq_u32(H_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
-    a = vaddq_u32(ROTATELEFT_SIMD(a, s), b); \
-  }\
+  uint32x4_t tmp = vaddq_u32(a, vaddq_u32(H_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
+  tmp = vaddq_u32(ROTATELEFT_SIMD(tmp, s), b); \
+  a = vbslq_u32(mask, tmp, a); \
 }
 
 #define II_SIMD(a, b, c, d, x, s, ac, mask) { \
-  if (vmaxvq_u32(mask)) { \
-    a = vaddq_u32(a, vaddq_u32(I_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
-    a = vaddq_u32(ROTATELEFT_SIMD(a, s), b); \
-  }\
+  uint32x4_t tmp = vaddq_u32(a, vaddq_u32(I_SIMD(b, c, d), vaddq_u32(x, vdupq_n_u32(ac)))); \
+  tmp = vaddq_u32(ROTATELEFT_SIMD(tmp, s), b); \
+  a = vbslq_u32(mask, tmp, a); \
+}
+
+// *8way SIMD 版本 (适配 uint32x4x2_t) >>>
+#define F_SIMD_8advanced(x, y, z) (uint32x4x2_t){ \
+  vorrq_u32(vandq_u32((x).val[0], (y).val[0]), vandq_u32(vmvnq_u32((x).val[0]), (z).val[0])), \
+  vorrq_u32(vandq_u32((x).val[1], (y).val[1]), vandq_u32(vmvnq_u32((x).val[1]), (z).val[1])) \
+}
+
+#define G_SIMD_8advanced(x, y, z) (uint32x4x2_t){ \
+  vorrq_u32(vandq_u32((x).val[0], (z).val[0]), vandq_u32((y).val[0], vmvnq_u32((z).val[0]))), \
+  vorrq_u32(vandq_u32((x).val[1], (z).val[1]), vandq_u32((y).val[1], vmvnq_u32((z).val[1]))) \
+}
+
+#define H_SIMD_8advanced(x, y, z) (uint32x4x2_t){ \
+  veorq_u32((x).val[0], veorq_u32((y).val[0], (z).val[0])), \
+  veorq_u32((x).val[1], veorq_u32((y).val[1], (z).val[1])) \
+}
+
+#define I_SIMD_8advanced(x, y, z) (uint32x4x2_t){ \
+  veorq_u32((y).val[0], vorrq_u32((x).val[0], vmvnq_u32((z).val[0]))), \
+  veorq_u32((y).val[1], vorrq_u32((x).val[1], vmvnq_u32((z).val[1]))) \
+}
+
+#define ROTATELEFT_SIMD_8advanced(num, n) (uint32x4x2_t){ \
+  vorrq_u32(vshlq_n_u32((num).val[0], (n)), vshrq_n_u32((num).val[0], (32 - (n)))), \
+  vorrq_u32(vshlq_n_u32((num).val[1], (n)), vshrq_n_u32((num).val[1], (32 - (n)))) \
+}
+
+#define FF_SIMD_8advanced(a, b, c, d, x, s, ac, mask) { \
+  uint32x4x2_t tmp; \
+  tmp.val[0] = vaddq_u32((a).val[0], vaddq_u32(F_SIMD_8advanced(b, c, d).val[0], vaddq_u32((x).val[0], vdupq_n_u32(ac)))); \
+  tmp.val[1] = vaddq_u32((a).val[1], vaddq_u32(F_SIMD_8advanced(b, c, d).val[1], vaddq_u32((x).val[1], vdupq_n_u32(ac)))); \
+  tmp = ROTATELEFT_SIMD_8advanced(tmp, s); \
+  tmp.val[0] = vaddq_u32(tmp.val[0], (b).val[0]); \
+  tmp.val[1] = vaddq_u32(tmp.val[1], (b).val[1]); \
+  (a).val[0] = vbslq_u32((mask).val[0], tmp.val[0], (a).val[0]); \
+  (a).val[1] = vbslq_u32((mask).val[1], tmp.val[1], (a).val[1]); \
+}
+
+#define GG_SIMD_8advanced(a, b, c, d, x, s, ac, mask) { \
+  uint32x4x2_t tmp; \
+  tmp.val[0] = vaddq_u32((a).val[0], vaddq_u32(G_SIMD_8advanced(b, c, d).val[0], vaddq_u32((x).val[0], vdupq_n_u32(ac)))); \
+  tmp.val[1] = vaddq_u32((a).val[1], vaddq_u32(G_SIMD_8advanced(b, c, d).val[1], vaddq_u32((x).val[1], vdupq_n_u32(ac)))); \
+  tmp = ROTATELEFT_SIMD_8advanced(tmp, s); \
+  tmp.val[0] = vaddq_u32(tmp.val[0], (b).val[0]); \
+  tmp.val[1] = vaddq_u32(tmp.val[1], (b).val[1]); \
+  (a).val[0] = vbslq_u32((mask).val[0], tmp.val[0], (a).val[0]); \
+  (a).val[1] = vbslq_u32((mask).val[1], tmp.val[1], (a).val[1]); \
+}
+
+#define HH_SIMD_8advanced(a, b, c, d, x, s, ac, mask) { \
+  uint32x4x2_t tmp; \
+  tmp.val[0] = vaddq_u32((a).val[0], vaddq_u32(H_SIMD_8advanced(b, c, d).val[0], vaddq_u32((x).val[0], vdupq_n_u32(ac)))); \
+  tmp.val[1] = vaddq_u32((a).val[1], vaddq_u32(H_SIMD_8advanced(b, c, d).val[1], vaddq_u32((x).val[1], vdupq_n_u32(ac)))); \
+  tmp = ROTATELEFT_SIMD_8advanced(tmp, s); \
+  tmp.val[0] = vaddq_u32(tmp.val[0], (b).val[0]); \
+  tmp.val[1] = vaddq_u32(tmp.val[1], (b).val[1]); \
+  (a).val[0] = vbslq_u32((mask).val[0], tmp.val[0], (a).val[0]); \
+  (a).val[1] = vbslq_u32((mask).val[1], tmp.val[1], (a).val[1]); \
+}
+
+#define II_SIMD_8advanced(a, b, c, d, x, s, ac, mask) { \
+  uint32x4x2_t tmp; \
+  tmp.val[0] = vaddq_u32((a).val[0], vaddq_u32(I_SIMD_8advanced(b, c, d).val[0], vaddq_u32((x).val[0], vdupq_n_u32(ac)))); \
+  tmp.val[1] = vaddq_u32((a).val[1], vaddq_u32(I_SIMD_8advanced(b, c, d).val[1], vaddq_u32((x).val[1], vdupq_n_u32(ac)))); \
+  tmp = ROTATELEFT_SIMD_8advanced(tmp, s); \
+  tmp.val[0] = vaddq_u32(tmp.val[0], (b).val[0]); \
+  tmp.val[1] = vaddq_u32(tmp.val[1], (b).val[1]); \
+  (a).val[0] = vbslq_u32((mask).val[0], tmp.val[0], (a).val[0]); \
+  (a).val[1] = vbslq_u32((mask).val[1], tmp.val[1], (a).val[1]); \
 }
 
 void MD5Hash(string input, bit32 *state);
 
-void SIMDMD5Hash(string *input, bit32 *state);
+void SIMDMD5Hash_2(string *input, bit32 *state);
+void SIMDMD5Hash_4(string *input, bit32 *state);
+void SIMDMD5Hash_8basic(string *input, bit32 *state);
+void SIMDMD5Hash_8advanced(string *input, bit32 *state);

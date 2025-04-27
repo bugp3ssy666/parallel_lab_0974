@@ -18,7 +18,7 @@ int main()
     double time_train = 0; // 模型训练的总时长
     PriorityQueue q;
     auto start_train = system_clock::now();
-    q.m.train("/guessdata/Rockyou-singleLined-full.txt");
+    q.m.train("./input/Rockyou-singleLined-full.txt");
     q.m.order();
     auto end_train = system_clock::now();
     auto duration_train = duration_cast<microseconds>(end_train - start_train);
@@ -58,39 +58,19 @@ int main()
         if (curr_num > 1000000)
         {
             auto start_hash = system_clock::now();
-            bit32 state[4 * 8];
+            bit32 state[4 * 4];
 
-            // SIMD *2
-            // for (int i = 0; i < q.total_guesses; i+=2) {
-            //     string pw[4] = {"", "", "", ""};
-            //     for (int i1 = 0; i1 < 2 && (i + i1) < q.total_guesses; ++i1) {
-            //         pw[i1] = q.guesses[i + i1];
-            //     }
-
-            //     SIMDMD5Hash_2(pw, state);
-            // }
-
-            // SIMD *4
+            // SIMD
             for (int i = 0; i < q.total_guesses; i+=4) {
                 string pw[4] = {"", "", "", ""};
                 for (int i1 = 0; i1 < 4 && (i + i1) < q.total_guesses; ++i1) {
                     pw[i1] = q.guesses[i + i1];
                 }
 
-                SIMDMD5Hash_4(pw, state);
+                SIMDMD5Hash(pw, state);
             }
 
-            // SIMD *8
-            // for (int i = 0; i < q.total_guesses; i+=8) {
-            //     string pw[8] = {"", "", "", "", "", "", "", ""};
-            //     for (int i1 = 0; i1 < 8 && (i + i1) < q.total_guesses; ++i1) {
-            //         pw[i1] = q.guesses[i + i1];
-            //     }
-
-            //     SIMDMD5Hash_8basic(pw, state);
-            // }
-
-            // no-optimization original
+            // original
             // for (string pw : q.guesses)
             // {
             //     // TODO：对于SIMD实验，将这里替换成你的SIMD MD5函数
