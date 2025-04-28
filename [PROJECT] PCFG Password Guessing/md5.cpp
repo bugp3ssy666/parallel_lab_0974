@@ -325,9 +325,6 @@ void SIMDMD5Hash_4(string *inputs, bit32 *state)
 	// messageLenths：记录各个消息的 Byte 数组长度
 	int *messageLengths = new int[PARA_NUM];
 
-	// maxByte：记录最大Byte数组长度
-	int maxByte = 0;
-
 	// 对所有消息进行初始化，获得整合 *16 字节对齐* 内存块
 	// 同时获取各个消息的 Byte 数组长度和最大 Byte 数组长度
 	Byte *paddedData = SIMDStringProcess(inputs, messageLengths, PARA_NUM, maxByte);

@@ -233,9 +233,6 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
 	// messageLenths：记录各个消息的 Byte 数组长度
 	int *messageLengths = new int[PARA_NUM];
 
-	// maxByte：记录最大Byte数组长度
-	int maxByte = 0;
-
 	// 对所有消息进行初始化，获得整合 *16 字节对齐* 内存块
 	// 同时获取各个消息的 Byte 数组长度和最大 Byte 数组长度
 	Byte *paddedMessages[4];
@@ -272,7 +269,7 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
 						   	   (paddedMessages[i2][4 * i1 + 2 + i * 64] << 16) |
 						   	   (paddedMessages[i2][4 * i1 + 3 + i * 64] << 24);
 			}
-			M[i1] = _mm_set_epi32(temp_vec[3], temp_vec[2], temp_vec[1], temp_vec[0]);
+			M[i1] = _mm_loadu_si128((__m128i*)temp_vec);
 		}
 
 		// 记录初始状态
@@ -358,12 +355,17 @@ void SIMDMD5Hash(string *inputs, bit32 *state)
         state_c = _mm_add_epi32(state_c, c);
         state_d = _mm_add_epi32(state_d, d);
 	}
+	// 转置矩阵
+	__m128i state_0 = _mm_set_epi32(_mm_extract_epi32(state_d, 0), _mm_extract_epi32(state_c, 0), _mm_extract_epi32(state_b, 0), _mm_extract_epi32(state_a, 0));
+	__m128i state_1 = _mm_set_epi32(_mm_extract_epi32(state_d, 1), _mm_extract_epi32(state_c, 1), _mm_extract_epi32(state_b, 1), _mm_extract_epi32(state_a, 1));
+	__m128i state_2 = _mm_set_epi32(_mm_extract_epi32(state_d, 2), _mm_extract_epi32(state_c, 2), _mm_extract_epi32(state_b, 2), _mm_extract_epi32(state_a, 2));
+	__m128i state_3 = _mm_set_epi32(_mm_extract_epi32(state_d, 3), _mm_extract_epi32(state_c, 3), _mm_extract_epi32(state_b, 3), _mm_extract_epi32(state_a, 3));
 
 	// 保存最终结果
-	_mm_storeu_si128((__m128i*)(state + 0), state_a);
-    _mm_storeu_si128((__m128i*)(state + 4), state_b);
-    _mm_storeu_si128((__m128i*)(state + 8), state_c);
-    _mm_storeu_si128((__m128i*)(state + 12), state_d);
+	_mm_storeu_si128((__m128i*)(state + 0), state_0);
+	_mm_storeu_si128((__m128i*)(state + 4), state_1);
+	_mm_storeu_si128((__m128i*)(state + 8), state_2);
+	_mm_storeu_si128((__m128i*)(state + 12), state_3);
 
 	// 将小端转换为大端格式
 	// 最终 4*4 的 state被填满，每 4 个 state 代表一个 MD5，依次读取即可
