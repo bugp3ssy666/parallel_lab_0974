@@ -58,44 +58,53 @@ int main()
         if (curr_num > 1000000)
         {
             auto start_hash = system_clock::now();
-            bit32 state[4 * 8];
 
-            // SIMD *2
+        // <===== SIMD *2 =====>
+            // bit32 state[4 * 4];
             // for (int i = 0; i < q.total_guesses; i+=2) {
             //     string pw[4] = {"", "", "", ""};
             //     for (int i1 = 0; i1 < 2 && (i + i1) < q.total_guesses; ++i1) {
             //         pw[i1] = q.guesses[i + i1];
             //     }
-
             //     SIMDMD5Hash_2(pw, state);
             // }
 
-            // SIMD *4
+        // <===== SIMD *4 =====>
+            bit32 state[4 * 4];
             for (int i = 0; i < q.total_guesses; i+=4) {
                 string pw[4] = {"", "", "", ""};
                 for (int i1 = 0; i1 < 4 && (i + i1) < q.total_guesses; ++i1) {
                     pw[i1] = q.guesses[i + i1];
                 }
-
                 SIMDMD5Hash_4(pw, state);
             }
 
-            // SIMD *8
+        // <=== SIMD *8 (-) ===>
+            // bit32 state[4 * 8];
             // for (int i = 0; i < q.total_guesses; i+=8) {
             //     string pw[8] = {"", "", "", "", "", "", "", ""};
             //     for (int i1 = 0; i1 < 8 && (i + i1) < q.total_guesses; ++i1) {
             //         pw[i1] = q.guesses[i + i1];
             //     }
-
             //     SIMDMD5Hash_8basic(pw, state);
             // }
 
-            // no-optimization original
+        // <=== SIMD *8 (+) ===>
+            // bit32 state[4 * 8];
+            // for (int i = 0; i < q.total_guesses; i+=8) {
+            //     string pw[8] = {"", "", "", "", "", "", "", ""};
+            //     for (int i1 = 0; i1 < 8 && (i + i1) < q.total_guesses; ++i1) {
+            //         pw[i1] = q.guesses[i + i1];
+            //     }
+            //     SIMDMD5Hash_8advanced(pw, state);
+            // }
+
+        // <= no-optimization =>
+            // bit32 state[4 * 4];
             // for (string pw : q.guesses)
             // {
             //     // TODO：对于SIMD实验，将这里替换成你的SIMD MD5函数
             //     MD5Hash(pw, state);
-
             //     // 以下注释部分用于输出猜测和哈希，但是由于自动测试系统不太能写文件，所以这里你可以改成cout
             //     // a<<pw<<"\t";
             //     // for (int i1 = 0; i1 < 4; i1 += 1)

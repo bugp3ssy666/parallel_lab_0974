@@ -95,37 +95,38 @@ typedef __m128i vec_u32; // SSE equivalent of uint32x4_t
 #define ROTATELEFT_SIMD(num, n) \
     _mm_or_si128(_mm_slli_epi32(num, n), _mm_srli_epi32(num, 32 - (n)))
 
-#define FF_SIMD(a, b, c, d, x, s, ac, mask) { \
+#define FF_SIMD(a, b, c, d, x, s, ac) { \
   __m128i tmp = _mm_add_epi32(F_SIMD(b, c, d), _mm_add_epi32(x, _mm_set1_epi32(ac))); \
   tmp = _mm_add_epi32(a, tmp); \
   tmp = ROTATELEFT_SIMD(tmp, s); \
   tmp = _mm_add_epi32(tmp, b); \
-  a = _mm_blendv_epi8(a, tmp, mask); \
+  a = tmp; \
 }
 
-#define GG_SIMD(a, b, c, d, x, s, ac, mask) { \
+#define GG_SIMD(a, b, c, d, x, s, ac) { \
   __m128i tmp = _mm_add_epi32(G_SIMD(b, c, d), _mm_add_epi32(x, _mm_set1_epi32(ac))); \
   tmp = _mm_add_epi32(a, tmp); \
   tmp = ROTATELEFT_SIMD(tmp, s); \
   tmp = _mm_add_epi32(tmp, b); \
-  a = _mm_blendv_epi8(a, tmp, mask); \
+  a = tmp; \
 }
 
-#define HH_SIMD(a, b, c, d, x, s, ac, mask) { \
+#define HH_SIMD(a, b, c, d, x, s, ac) { \
   __m128i tmp = _mm_add_epi32(H_SIMD(b, c, d), _mm_add_epi32(x, _mm_set1_epi32(ac))); \
   tmp = _mm_add_epi32(a, tmp); \
   tmp = ROTATELEFT_SIMD(tmp, s); \
   tmp = _mm_add_epi32(tmp, b); \
-  a = _mm_blendv_epi8(a, tmp, mask); \
+  a = tmp; \
 }
 
-#define II_SIMD(a, b, c, d, x, s, ac, mask) { \
+#define II_SIMD(a, b, c, d, x, s, ac) { \
   __m128i tmp = _mm_add_epi32(I_SIMD(b, c, d), _mm_add_epi32(x, _mm_set1_epi32(ac))); \
   tmp = _mm_add_epi32(a, tmp); \
   tmp = ROTATELEFT_SIMD(tmp, s); \
   tmp = _mm_add_epi32(tmp, b); \
-  a = _mm_blendv_epi8(a, tmp, mask); \
+  a = tmp; \
 }
+
 
 void MD5Hash(string input, bit32 *state);
 

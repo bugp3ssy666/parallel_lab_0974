@@ -30,7 +30,7 @@ int main()
     auto start = system_clock::now();
     // 由于需要定期清空内存，我们在这里记录已生成的猜测总数
     int history = 0;
-    // std::ofstream a("./files/results.txt");
+    std::ofstream a("./output/results.txt");
     while (!q.priority.empty())
     {
         q.PopNext();
