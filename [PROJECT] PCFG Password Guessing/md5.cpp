@@ -325,6 +325,9 @@ void SIMDMD5Hash_4(string *inputs, bit32 *state)
 	// messageLenths：记录各个消息的 Byte 数组长度
 	int *messageLengths = new int[PARA_NUM];
 
+	// maxByte：记录最大Byte数组长度
+	int maxByte = 0;
+
 	// 对所有消息进行初始化，获得整合 *16 字节对齐* 内存块
 	// 同时获取各个消息的 Byte 数组长度和最大 Byte 数组长度
 	Byte *paddedData = SIMDStringProcess(inputs, messageLengths, PARA_NUM, maxByte);
@@ -487,113 +490,109 @@ void SIMDMD5Hash_2(string *inputs, bit32 *state)
 	
 	int n_blocks = messageLengths[0] / 64;
 
-	uint32x4_t state_a = vdupq_n_u32(0x67452301);
-    uint32x4_t state_b = vdupq_n_u32(0xefcdab89);
-    uint32x4_t state_c = vdupq_n_u32(0x98badcfe);
-    uint32x4_t state_d = vdupq_n_u32(0x10325476);
+	uint32x2_t state_a = vdup_n_u32(0x67452301);
+    uint32x2_t state_b = vdup_n_u32(0xefcdab89);
+    uint32x2_t state_c = vdup_n_u32(0x98badcfe);
+    uint32x2_t state_d = vdup_n_u32(0x10325476);
 
 	for (int i = 0; i < n_blocks; i += 1) {
-		uint32x4_t M[16];
+		uint32x2_t M[16];
 
 		for (int i1 = 0; i1 < 16; ++i1)
 		{
-			uint32_t temp_vec[4] = {0};
+			uint32_t temp_vec[2] = {0};
 			for (int i2 = 0; i2 < PARA_NUM; ++i2) {
 				temp_vec[i2] = ((uint32_t)paddedData[4 * i1 + maxByte * i2 + i * 64]) |
 						   	   ((uint32_t)paddedData[4 * i1 + 1 + maxByte * i2 + i * 64] << 8) |
 						  	   ((uint32_t)paddedData[4 * i1 + 2 + maxByte * i2 + i * 64] << 16) |
 						   	   ((uint32_t)paddedData[4 * i1 + 3 + maxByte * i2 + i * 64] << 24);
 			}
-			M[i1] = vld1q_u32(temp_vec);
+			M[i1] = vld1_u32(temp_vec);
 		}
 
-		uint32x4_t a = state_a, b = state_b, c = state_c, d = state_d;
+		uint32x2_t a = state_a, b = state_b, c = state_c, d = state_d;
 
 		auto start = system_clock::now();
 
-		FF_SIMD(a, b, c, d, M[0], s11, 0xd76aa478);
-		FF_SIMD(d, a, b, c, M[1], s12, 0xe8c7b756);
-		FF_SIMD(c, d, a, b, M[2], s13, 0x242070db);
-		FF_SIMD(b, c, d, a, M[3], s14, 0xc1bdceee);
-		FF_SIMD(a, b, c, d, M[4], s11, 0xf57c0faf);
-		FF_SIMD(d, a, b, c, M[5], s12, 0x4787c62a);
-		FF_SIMD(c, d, a, b, M[6], s13, 0xa8304613);
-		FF_SIMD(b, c, d, a, M[7], s14, 0xfd469501);
-		FF_SIMD(a, b, c, d, M[8], s11, 0x698098d8);
-		FF_SIMD(d, a, b, c, M[9], s12, 0x8b44f7af);
-		FF_SIMD(c, d, a, b, M[10], s13, 0xffff5bb1);
-		FF_SIMD(b, c, d, a, M[11], s14, 0x895cd7be);
-		FF_SIMD(a, b, c, d, M[12], s11, 0x6b901122);
-		FF_SIMD(d, a, b, c, M[13], s12, 0xfd987193);
-		FF_SIMD(c, d, a, b, M[14], s13, 0xa679438e);
-		FF_SIMD(b, c, d, a, M[15], s14, 0x49b40821);
+		FF_SIMD_2(a, b, c, d, M[0], s11, 0xd76aa478);
+		FF_SIMD_2(d, a, b, c, M[1], s12, 0xe8c7b756);
+		FF_SIMD_2(c, d, a, b, M[2], s13, 0x242070db);
+		FF_SIMD_2(b, c, d, a, M[3], s14, 0xc1bdceee);
+		FF_SIMD_2(a, b, c, d, M[4], s11, 0xf57c0faf);
+		FF_SIMD_2(d, a, b, c, M[5], s12, 0x4787c62a);
+		FF_SIMD_2(c, d, a, b, M[6], s13, 0xa8304613);
+		FF_SIMD_2(b, c, d, a, M[7], s14, 0xfd469501);
+		FF_SIMD_2(a, b, c, d, M[8], s11, 0x698098d8);
+		FF_SIMD_2(d, a, b, c, M[9], s12, 0x8b44f7af);
+		FF_SIMD_2(c, d, a, b, M[10], s13, 0xffff5bb1);
+		FF_SIMD_2(b, c, d, a, M[11], s14, 0x895cd7be);
+		FF_SIMD_2(a, b, c, d, M[12], s11, 0x6b901122);
+		FF_SIMD_2(d, a, b, c, M[13], s12, 0xfd987193);
+		FF_SIMD_2(c, d, a, b, M[14], s13, 0xa679438e);
+		FF_SIMD_2(b, c, d, a, M[15], s14, 0x49b40821);
 
-		GG_SIMD(a, b, c, d, M[1], s21, 0xf61e2562);
-		GG_SIMD(d, a, b, c, M[6], s22, 0xc040b340);
-		GG_SIMD(c, d, a, b, M[11], s23, 0x265e5a51);
-		GG_SIMD(b, c, d, a, M[0], s24, 0xe9b6c7aa);
-		GG_SIMD(a, b, c, d, M[5], s21, 0xd62f105d);
-		GG_SIMD(d, a, b, c, M[10], s22, 0x2441453);
-		GG_SIMD(c, d, a, b, M[15], s23, 0xd8a1e681);
-		GG_SIMD(b, c, d, a, M[4], s24, 0xe7d3fbc8);
-		GG_SIMD(a, b, c, d, M[9], s21, 0x21e1cde6);
-		GG_SIMD(d, a, b, c, M[14], s22, 0xc33707d6);
-		GG_SIMD(c, d, a, b, M[3], s23, 0xf4d50d87);
-		GG_SIMD(b, c, d, a, M[8], s24, 0x455a14ed);
-		GG_SIMD(a, b, c, d, M[13], s21, 0xa9e3e905);
-		GG_SIMD(d, a, b, c, M[2], s22, 0xfcefa3f8);
-		GG_SIMD(c, d, a, b, M[7], s23, 0x676f02d9);
-		GG_SIMD(b, c, d, a, M[12], s24, 0x8d2a4c8a);
+		GG_SIMD_2(a, b, c, d, M[1], s21, 0xf61e2562);
+		GG_SIMD_2(d, a, b, c, M[6], s22, 0xc040b340);
+		GG_SIMD_2(c, d, a, b, M[11], s23, 0x265e5a51);
+		GG_SIMD_2(b, c, d, a, M[0], s24, 0xe9b6c7aa);
+		GG_SIMD_2(a, b, c, d, M[5], s21, 0xd62f105d);
+		GG_SIMD_2(d, a, b, c, M[10], s22, 0x2441453);
+		GG_SIMD_2(c, d, a, b, M[15], s23, 0xd8a1e681);
+		GG_SIMD_2(b, c, d, a, M[4], s24, 0xe7d3fbc8);
+		GG_SIMD_2(a, b, c, d, M[9], s21, 0x21e1cde6);
+		GG_SIMD_2(d, a, b, c, M[14], s22, 0xc33707d6);
+		GG_SIMD_2(c, d, a, b, M[3], s23, 0xf4d50d87);
+		GG_SIMD_2(b, c, d, a, M[8], s24, 0x455a14ed);
+		GG_SIMD_2(a, b, c, d, M[13], s21, 0xa9e3e905);
+		GG_SIMD_2(d, a, b, c, M[2], s22, 0xfcefa3f8);
+		GG_SIMD_2(c, d, a, b, M[7], s23, 0x676f02d9);
+		GG_SIMD_2(b, c, d, a, M[12], s24, 0x8d2a4c8a);
 
-		HH_SIMD(a, b, c, d, M[5], s31, 0xfffa3942);
-		HH_SIMD(d, a, b, c, M[8], s32, 0x8771f681);
-		HH_SIMD(c, d, a, b, M[11], s33, 0x6d9d6122);
-		HH_SIMD(b, c, d, a, M[14], s34, 0xfde5380c);
-		HH_SIMD(a, b, c, d, M[1], s31, 0xa4beea44);
-		HH_SIMD(d, a, b, c, M[4], s32, 0x4bdecfa9);
-		HH_SIMD(c, d, a, b, M[7], s33, 0xf6bb4b60);
-		HH_SIMD(b, c, d, a, M[10], s34, 0xbebfbc70);
-		HH_SIMD(a, b, c, d, M[13], s31, 0x289b7ec6);
-		HH_SIMD(d, a, b, c, M[0], s32, 0xeaa127fa);
-		HH_SIMD(c, d, a, b, M[3], s33, 0xd4ef3085);
-		HH_SIMD(b, c, d, a, M[6], s34, 0x4881d05);
-		HH_SIMD(a, b, c, d, M[9], s31, 0xd9d4d039);
-		HH_SIMD(d, a, b, c, M[12], s32, 0xe6db99e5);
-		HH_SIMD(c, d, a, b, M[15], s33, 0x1fa27cf8);
-		HH_SIMD(b, c, d, a, M[2], s34, 0xc4ac5665);
+		HH_SIMD_2(a, b, c, d, M[5], s31, 0xfffa3942);
+		HH_SIMD_2(d, a, b, c, M[8], s32, 0x8771f681);
+		HH_SIMD_2(c, d, a, b, M[11], s33, 0x6d9d6122);
+		HH_SIMD_2(b, c, d, a, M[14], s34, 0xfde5380c);
+		HH_SIMD_2(a, b, c, d, M[1], s31, 0xa4beea44);
+		HH_SIMD_2(d, a, b, c, M[4], s32, 0x4bdecfa9);
+		HH_SIMD_2(c, d, a, b, M[7], s33, 0xf6bb4b60);
+		HH_SIMD_2(b, c, d, a, M[10], s34, 0xbebfbc70);
+		HH_SIMD_2(a, b, c, d, M[13], s31, 0x289b7ec6);
+		HH_SIMD_2(d, a, b, c, M[0], s32, 0xeaa127fa);
+		HH_SIMD_2(c, d, a, b, M[3], s33, 0xd4ef3085);
+		HH_SIMD_2(b, c, d, a, M[6], s34, 0x4881d05);
+		HH_SIMD_2(a, b, c, d, M[9], s31, 0xd9d4d039);
+		HH_SIMD_2(d, a, b, c, M[12], s32, 0xe6db99e5);
+		HH_SIMD_2(c, d, a, b, M[15], s33, 0x1fa27cf8);
+		HH_SIMD_2(b, c, d, a, M[2], s34, 0xc4ac5665);
 
-		II_SIMD(a, b, c, d, M[0], s41, 0xf4292244);
-		II_SIMD(d, a, b, c, M[7], s42, 0x432aff97);
-		II_SIMD(c, d, a, b, M[14], s43, 0xab9423a7);
-		II_SIMD(b, c, d, a, M[5], s44, 0xfc93a039);
-		II_SIMD(a, b, c, d, M[12], s41, 0x655b59c3);
-		II_SIMD(d, a, b, c, M[3], s42, 0x8f0ccc92);
-		II_SIMD(c, d, a, b, M[10], s43, 0xffeff47d);
-		II_SIMD(b, c, d, a, M[1], s44, 0x85845dd1);
-		II_SIMD(a, b, c, d, M[8], s41, 0x6fa87e4f);
-		II_SIMD(d, a, b, c, M[15], s42, 0xfe2ce6e0);
-		II_SIMD(c, d, a, b, M[6], s43, 0xa3014314);
-		II_SIMD(b, c, d, a, M[13], s44, 0x4e0811a1);
-		II_SIMD(a, b, c, d, M[4], s41, 0xf7537e82);
-		II_SIMD(d, a, b, c, M[11], s42, 0xbd3af235);
-		II_SIMD(c, d, a, b, M[2], s43, 0x2ad7d2bb);
-		II_SIMD(b, c, d, a, M[9], s44, 0xeb86d391);
+		II_SIMD_2(a, b, c, d, M[0], s41, 0xf4292244);
+		II_SIMD_2(d, a, b, c, M[7], s42, 0x432aff97);
+		II_SIMD_2(c, d, a, b, M[14], s43, 0xab9423a7);
+		II_SIMD_2(b, c, d, a, M[5], s44, 0xfc93a039);
+		II_SIMD_2(a, b, c, d, M[12], s41, 0x655b59c3);
+		II_SIMD_2(d, a, b, c, M[3], s42, 0x8f0ccc92);
+		II_SIMD_2(c, d, a, b, M[10], s43, 0xffeff47d);
+		II_SIMD_2(b, c, d, a, M[1], s44, 0x85845dd1);
+		II_SIMD_2(a, b, c, d, M[8], s41, 0x6fa87e4f);
+		II_SIMD_2(d, a, b, c, M[15], s42, 0xfe2ce6e0);
+		II_SIMD_2(c, d, a, b, M[6], s43, 0xa3014314);
+		II_SIMD_2(b, c, d, a, M[13], s44, 0x4e0811a1);
+		II_SIMD_2(a, b, c, d, M[4], s41, 0xf7537e82);
+		II_SIMD_2(d, a, b, c, M[11], s42, 0xbd3af235);
+		II_SIMD_2(c, d, a, b, M[2], s43, 0x2ad7d2bb);
+		II_SIMD_2(b, c, d, a, M[9], s44, 0xeb86d391);
 
-		state_a = vaddq_u32(state_a, a);
-		state_b = vaddq_u32(state_b, b);
-		state_c = vaddq_u32(state_c, c);
-		state_d = vaddq_u32(state_d, d);
+		state_a = vadd_u32(state_a, a);
+		state_b = vadd_u32(state_b, b);
+		state_c = vadd_u32(state_c, c);
+		state_d = vadd_u32(state_d, d);
 
 	}
-	uint32x4_t state_0 = {vgetq_lane_u32(state_a, 0), vgetq_lane_u32(state_b, 0), vgetq_lane_u32(state_c, 0), vgetq_lane_u32(state_d, 0)};
-	uint32x4_t state_1 = {vgetq_lane_u32(state_a, 1), vgetq_lane_u32(state_b, 1), vgetq_lane_u32(state_c, 1), vgetq_lane_u32(state_d, 1)};
-	uint32x4_t state_2 = {vgetq_lane_u32(state_a, 2), vgetq_lane_u32(state_b, 2), vgetq_lane_u32(state_c, 2), vgetq_lane_u32(state_d, 2)};
-	uint32x4_t state_3 = {vgetq_lane_u32(state_a, 3), vgetq_lane_u32(state_b, 3), vgetq_lane_u32(state_c, 3), vgetq_lane_u32(state_d, 3)};
+	uint32x4_t state_0 = {vget_lane_u32(state_a, 0), vget_lane_u32(state_b, 0), vget_lane_u32(state_c, 0), vget_lane_u32(state_d, 0)};
+	uint32x4_t state_1 = {vget_lane_u32(state_a, 1), vget_lane_u32(state_b, 1), vget_lane_u32(state_c, 1), vget_lane_u32(state_d, 1)};
 
 	vst1q_u32(state + 0, state_0);
 	vst1q_u32(state + 4, state_1);
-	vst1q_u32(state + 8, state_2);
-	vst1q_u32(state + 12, state_3);
 
 	for (int i = 0; i < 4 * PARA_NUM; i++)
 	{

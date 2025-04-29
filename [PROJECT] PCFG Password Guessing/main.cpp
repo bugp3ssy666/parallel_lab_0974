@@ -60,9 +60,9 @@ int main()
             auto start_hash = system_clock::now();
 
         // <===== SIMD *2 =====>
-            // bit32 state[4 * 4];
+            // bit32 state[4 * 2];
             // for (int i = 0; i < q.total_guesses; i+=2) {
-            //     string pw[4] = {"", "", "", ""};
+            //     string pw[2] = {"", ""};
             //     for (int i1 = 0; i1 < 2 && (i + i1) < q.total_guesses; ++i1) {
             //         pw[i1] = q.guesses[i + i1];
             //     }

@@ -50,6 +50,12 @@ typedef unsigned int bit32;
 #define H_SIMD(x, y, z) veorq_u32(x, veorq_u32(y, z))
 #define I_SIMD(x, y, z) veorq_u32(y, vorrq_u32(x, vmvnq_u32(z)))
 
+// *SIMD 2-way 版本 >>>
+#define F_SIMD_2(x, y, z) vorr_u32(vand_u32(x, y), vand_u32(vmvn_u32(x), z))
+#define G_SIMD_2(x, y, z) vorr_u32(vand_u32(x, z), vand_u32(y, vmvn_u32(z)))
+#define H_SIMD_2(x, y, z) veor_u32(x, veor_u32(y, z))
+#define I_SIMD_2(x, y, z) veor_u32(y, vorr_u32(x, vmvn_u32(z)))
+
 /**
  * @Rotate Left.
  *
@@ -67,6 +73,10 @@ typedef unsigned int bit32;
 // *SIMD 版本 >>>
 #define ROTATELEFT_SIMD(num, n) \
     vorrq_u32(vshlq_n_u32((num), (n)), vshrq_n_u32((num), (32 - (n))))
+
+// *SIMD 2-way 版本 >>>
+#define ROTATELEFT_SIMD_2(num, n) \
+    vorr_u32(vshl_n_u32((num), (n)), vshr_n_u32((num), (32 - (n))))    
 
 #define FF(a, b, c, d, x, s, ac) { \
   (a) += F ((b), (c), (d)) + (x) + ac; \
@@ -90,7 +100,7 @@ typedef unsigned int bit32;
   (a) += (b); \
 }
 
-// *SIMD 版本 >>>
+// *SIMD 4-way 版本 >>>
 #define FF_SIMD(a, b, c, d, x, s, ac) { \
   a = vaddq_u32(ROTATELEFT_SIMD(vaddq_u32(vaddq_u32(a, F_SIMD(b, c, d)), vaddq_u32(x, vdupq_n_u32(ac))), s), b); \
 }
@@ -107,7 +117,24 @@ typedef unsigned int bit32;
   a = vaddq_u32(ROTATELEFT_SIMD(vaddq_u32(vaddq_u32(a, I_SIMD(b, c, d)), vaddq_u32(x, vdupq_n_u32(ac))), s), b); \
 }
 
-// *8-way SIMD 版本 (适配八路并行方法下的 uint32x4x2_t 类型) >>>
+// *SIMD 2-way 版本 >>>
+#define FF_SIMD_2(a, b, c, d, x, s, ac) { \
+  a = vadd_u32(ROTATELEFT_SIMD_2(vadd_u32(vadd_u32(a, F_SIMD_2(b, c, d)), vadd_u32(x, vdup_n_u32(ac))), s), b); \
+}
+
+#define GG_SIMD_2(a, b, c, d, x, s, ac) { \
+  a = vadd_u32(ROTATELEFT_SIMD_2(vadd_u32(vadd_u32(a, G_SIMD_2(b, c, d)), vadd_u32(x, vdup_n_u32(ac))), s), b); \
+}
+
+#define HH_SIMD_2(a, b, c, d, x, s, ac) { \
+  a = vadd_u32(ROTATELEFT_SIMD_2(vadd_u32(vadd_u32(a, H_SIMD_2(b, c, d)), vadd_u32(x, vdup_n_u32(ac))), s), b); \
+}
+
+#define II_SIMD_2(a, b, c, d, x, s, ac) { \
+  a = vadd_u32(ROTATELEFT_SIMD_2(vadd_u32(vadd_u32(a, I_SIMD_2(b, c, d)), vadd_u32(x, vdup_n_u32(ac))), s), b); \
+}
+
+// *SIMD 8-way 版本 (适配八路并行方法下的 uint32x4x2_t 类型) >>>
 #define F_SIMD_8advanced(x, y, z) (uint32x4x2_t){ \
   vorrq_u32(vandq_u32((x).val[0], (y).val[0]), vandq_u32(vmvnq_u32((x).val[0]), (z).val[0])), \
   vorrq_u32(vandq_u32((x).val[1], (y).val[1]), vandq_u32(vmvnq_u32((x).val[1]), (z).val[1])) \
