@@ -3,9 +3,16 @@
 #include <unordered_map>
 #include <queue>
 #include <omp.h>
+#include <pthread.h>    // 使用 pthread
+#include <omp.h>        // 使用 OpenMP
+#include <atomic>
 // #include <chrono>   
 // using namespace chrono;
 using namespace std;
+
+#define NUM_THREADS 8   // 设置线程数
+
+#define POOL_CHUNK_SIZE 10000  // 设置 pthread pool 方法中一个任务处理的元素量
 
 class segment
 {
@@ -155,8 +162,86 @@ public:
     // 对优先队列的一个PT，生成所有guesses
     void Generate(PT pt);
 
+    // pthread 生成（无线程池）
+    void PthreadGenerate(PT pt);
+
+    // pthread 生成（有线程池）
+    void PthreadPoolGenerate(PT pt);
+
+    // openmp 生成
+    void OpenMPGenerate(PT pt);
+
     // 将优先队列最前面的一个PT
     void PopNext();
     int total_guesses = 0;
     vector<string> guesses;
 };
+
+// [========== pthread 方法相关 ==========] //
+
+// 线程数据结构
+typedef struct {
+    int t_id;
+    segment* a;
+    int max_index;
+    vector<string>* guesses;
+    int* total_guesses;
+    string init_guess;
+} threadParam_t;
+
+// 线程函数
+void* threadFunc(void* param);
+
+// 线程任务结构
+typedef struct {
+    int t_start, t_end;
+    string t_preguess;
+    vector<string>* shared_values;
+    string* shared_guesses;
+    bool t_active;
+} threadTask_t;
+
+// 线程池类
+class ThreadPool
+{
+    private:
+    // 线程列表
+    vector<pthread_t> threads;
+    // 任务队列
+    queue<threadTask_t> tasks;
+    // 活跃任务数（包括已分配给线程正在运行的，和已入列但未分配的）
+    int active_tasks;
+    
+    // 条件变量：有新任务或需要开始其他线程操作
+    pthread_cond_t active_cond;
+    // 条件变量：所有任务完成
+    pthread_cond_t alldone_cond;
+    
+    // 队列互斥锁
+    pthread_mutex_t task_mutex;
+    // 线程安全的停止符号
+    std::atomic<bool> terminate;
+    
+    public:
+    // 构造函数
+    ThreadPool();
+    // 析构函数
+    ~ThreadPool();
+    
+    // 添加任务
+    void taskAppend(threadTask_t task);
+    // 等待完成
+    void waitAll();
+    
+private:
+    // 线程任务函数
+    static void* threadFunction(void* pool);
+};
+
+// 创建线程池
+void initThreadPool();
+
+// 删除线程池
+void deleteThreadPool();
+
+// [======================================] //
