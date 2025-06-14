@@ -4,14 +4,10 @@ using namespace std;
 // 互斥锁，保护从猜测列表的读和写操作
 pthread_mutex_t mutex_guess;
 
-// 动态分配任务用，记录总分配进程
-int pthread_global_index = 0;
-
 // 全局线程池指针
 ThreadPool* thread_pool = NULL;
 
-void PriorityQueue::CalProb(PT &pt)
-{
+void PriorityQueue::CalProb(PT &pt) {
     // 计算PriorityQueue里面一个PT的流程如下：
     // 1. 首先需要计算一个PT本身的概率。例如，L6S1的概率为0.15
     // 2. 需要注意的是，Queue里面的PT不是“纯粹的”PT，而是除了最后一个segment以外，全部被value实例化的PT
@@ -59,8 +55,7 @@ void PriorityQueue::CalProb(PT &pt)
     // cout << pt.prob << endl;
 }
 
-void PriorityQueue::init()
-{
+void PriorityQueue::init() {
     // cout << m.ordered_pts.size() << endl;
     // 用所有可能的PT，按概率降序填满整个优先队列
     for (PT pt : m.ordered_pts)
@@ -98,8 +93,7 @@ void PriorityQueue::init()
     // cout << "priority size:" << priority.size() << endl;
 }
 
-void PriorityQueue::PopNext()
-{
+void PriorityQueue::PopNext() {
 
     // 对优先队列最前面的PT，首先利用这个PT生成一系列猜测
     // <=== 串行方法 ===>
@@ -108,7 +102,11 @@ void PriorityQueue::PopNext()
     // PthreadGenerate(priority.front());
     // PthreadPoolGenerate(priority.front());
     // <== openmp 方法 =>
-    OpenMPGenerate(priority.front());
+    // OpenMPGenerate(priority.front());
+    // <=== MPI方法 ===>
+    // MPIGenerate(priority.front());
+    // <=== MPI+方法 ==>
+    MPIplusOpenMPGenerate(priority.front());
 
     // 然后需要根据即将出队的PT，生成一系列新的PT
     vector<PT> new_pts = priority.front().NewPTs();
@@ -148,8 +146,7 @@ void PriorityQueue::PopNext()
 
 // 这个函数你就算看不懂，对并行算法的实现影响也不大
 // 当然如果你想做一个基于多优先队列的并行算法，可能得稍微看一看了
-vector<PT> PT::NewPTs()
-{
+vector<PT> PT::NewPTs() {
     // 存储生成的新PT
     vector<PT> res;
 
@@ -193,8 +190,7 @@ vector<PT> PT::NewPTs()
 
 // 这个函数是PCFG并行化算法的主要载体
 // 尽量看懂，然后进行并行实现
-void PriorityQueue::Generate(PT pt)
-{
+void PriorityQueue::Generate(PT pt) {
     // 计算PT的概率，这里主要是给PT的概率进行初始化
     CalProb(pt);
 
@@ -305,16 +301,15 @@ void* threadFunc(void* param) {
     if (chunk_size == 0) {
         chunk_size = 1;
     }
-
     int start = t_id * chunk_size;
     int end = min(max_index, start + chunk_size);
+
     for (int my_index = start; my_index < end; my_index++) {
         // 执行任务
         string temp = guess + a->ordered_values[my_index];
         my_guesses.emplace_back(temp);
         my_count++;
     }
-
 
     // 临界区：结果写入猜测序列
     pthread_mutex_lock(&mutex_guess);
@@ -329,8 +324,7 @@ void* threadFunc(void* param) {
  * PthreadGenerate: pt 生成猜测的 pthread 并行方法（无线程池）
  * @param pt 生成用的原 pt
  */
-void PriorityQueue::PthreadGenerate(PT pt)
-{
+void PriorityQueue::PthreadGenerate(PT pt) {
     // 计算PT的概率，这里主要是给PT的概率进行初始化
     CalProb(pt);
 
@@ -356,7 +350,6 @@ void PriorityQueue::PthreadGenerate(PT pt)
         // pthread
         pthread_t handles[NUM_THREADS];
         threadParam_t params[NUM_THREADS];
-        pthread_global_index = 0;
 
         // 初始化锁
         pthread_mutex_init(&mutex_guess, NULL);
@@ -428,7 +421,6 @@ void PriorityQueue::PthreadGenerate(PT pt)
         // pthread
         pthread_t handles[NUM_THREADS];
         threadParam_t params[NUM_THREADS];
-        pthread_global_index = 0;
 
         // 初始化锁
         pthread_mutex_init(&mutex_guess, NULL);
@@ -480,7 +472,9 @@ ThreadPool::ThreadPool() : threads(), tasks(), active_tasks(0), terminate(false)
  */
 ThreadPool::~ThreadPool() {
     // 设置终止标志
+    pthread_mutex_lock(&task_mutex);
     terminate = true;
+    pthread_mutex_unlock(&task_mutex);
     // 唤醒所有等待线程
     pthread_cond_broadcast(&active_cond);
     // 等待所有线程结束
@@ -596,8 +590,7 @@ void deleteThreadPool() {
  * PthreadPoolGenerate: pt 生成猜测的 pthread 并行方法（有线程池）
  * @param pt 生成用的原 pt
  */
-void PriorityQueue::PthreadPoolGenerate(PT pt)
-{
+void PriorityQueue::PthreadPoolGenerate(PT pt) {
     // 计算PT的概率，这里主要是给PT的概率进行初始化
     CalProb(pt);
 
@@ -725,7 +718,7 @@ void PriorityQueue::PthreadPoolGenerate(PT pt)
         if (batch_size < 100000) {
             // 直接使用串行处理
             for (int i = 0; i < batch_size; i++) {
-                guesses.push_back(a->ordered_values[i]);
+                guesses.push_back(guess + a->ordered_values[i]);
             }
             total_guesses += batch_size;
             return;
@@ -783,8 +776,7 @@ void PriorityQueue::PthreadPoolGenerate(PT pt)
  * OpenMPGenerate: pt 生成猜测的 OpenMP 并行方法
  * @param pt 生成用的原 pt
  */
-void PriorityQueue::OpenMPGenerate(PT pt)
-{
+void PriorityQueue::OpenMPGenerate(PT pt) {
     // 计算PT的概率，这里主要是给PT的概率进行初始化
     CalProb(pt);
 
@@ -809,7 +801,7 @@ void PriorityQueue::OpenMPGenerate(PT pt)
 
         #pragma omp parallel
         {
-            // 共享存储所有线程生成的猜测
+            // 局部向量存储单个线程生成的猜测
             std::vector<std::string> thread_guesses;
 
             // 主要逻辑：循环生成猜测，OpenMP 自动分配线程任务
@@ -873,7 +865,7 @@ void PriorityQueue::OpenMPGenerate(PT pt)
 
         #pragma omp parallel
         {
-            // 共享存储所有线程生成的猜测
+            // 局部向量存储单个线程生成的猜测
             std::vector<std::string> thread_guesses;
 
             // 主要逻辑：循环生成猜测，OpenMP 自动分配线程任务
@@ -890,6 +882,311 @@ void PriorityQueue::OpenMPGenerate(PT pt)
                 guesses.insert(guesses.end(), thread_guesses.begin(), thread_guesses.end());
                 total_guesses += thread_guesses.size();
             }
+        }
+    }
+}
+
+// ======================================= //
+
+// ============= mpi 相关实现 ============= //
+
+void PriorityQueue::MPIGenerate(PT pt) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    CalProb(pt);
+
+    if (pt.content.size() == 1) {
+        segment *a;
+        if (pt.content[0].type == 1)
+        {
+            a = &m.letters[m.FindLetter(pt.content[0])];
+        }
+        if (pt.content[0].type == 2)
+        {
+            a = &m.digits[m.FindDigit(pt.content[0])];
+        }
+        if (pt.content[0].type == 3)
+        {
+            a = &m.symbols[m.FindSymbol(pt.content[0])];
+        }
+
+
+        int total_work = pt.max_indices[0];
+
+        // 动态划分任务
+        int base_chunk = total_work / size;
+        int remain_pack = total_work % size;
+        int start, end;
+
+        if (rank < remain_pack) {
+            start = rank * (base_chunk + 1);
+            end = start + base_chunk + 1;
+        }
+        else {
+            start = remain_pack * (base_chunk + 1) + (rank - remain_pack) * base_chunk;
+            end = start + base_chunk;
+        }
+
+        for (int i = start; i < end; i++) {
+            guesses.push_back(a->ordered_values[i]);
+        }
+
+        int local_count = end - start;
+        int global_count = 0;
+
+        // 汇总猜测总数
+        MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        total_guesses = global_count;
+    }
+    else {
+        string prefix;
+        int seg_idx = 0;
+        for (int idx : pt.curr_indices)
+        {
+            if (pt.content[seg_idx].type == 1)
+            {
+                prefix += m.letters[m.FindLetter(pt.content[seg_idx])].ordered_values[idx];
+            }
+            if (pt.content[seg_idx].type == 2)
+            {
+                prefix += m.digits[m.FindDigit(pt.content[seg_idx])].ordered_values[idx];
+            }
+            if (pt.content[seg_idx].type == 3)
+            {
+                prefix += m.symbols[m.FindSymbol(pt.content[seg_idx])].ordered_values[idx];
+            }
+            seg_idx += 1;
+            if (seg_idx == pt.content.size() - 1)
+            {
+                break;
+            }
+        }
+
+        segment *a;
+        if (pt.content[pt.content.size() - 1].type == 1)
+        {
+            a = &m.letters[m.FindLetter(pt.content[pt.content.size() - 1])];
+        }
+        if (pt.content[pt.content.size() - 1].type == 2)
+        {
+            a = &m.digits[m.FindDigit(pt.content[pt.content.size() - 1])];
+        }
+        if (pt.content[pt.content.size() - 1].type == 3)
+        {
+            a = &m.symbols[m.FindSymbol(pt.content[pt.content.size() - 1])];
+        }
+
+        int total_work = pt.max_indices[pt.content.size() - 1];
+
+        // 动态划分任务
+        int base_chunk = total_work / size;
+        int remain_pack = total_work % size;
+        int start, end;
+
+        if (rank < remain_pack) {
+            start = rank * (base_chunk + 1);
+            end = start + base_chunk + 1;
+        } else {
+            start = remain_pack * (base_chunk + 1) + (rank - remain_pack) * base_chunk;
+            end = start + base_chunk;
+        }
+
+        for (int i = start; i < end; ++i) {
+            guesses.push_back(prefix + a->ordered_values[i]);
+        }
+
+        int local_count = end - start;
+        int global_count = 0;
+
+        // 汇总猜测总数
+        MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        total_guesses = global_count;
+    }
+}
+
+void PriorityQueue::MPIplusOpenMPGenerate(PT pt) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    CalProb(pt);
+
+    if (pt.content.size() == 1) {
+        segment *a;
+        if (pt.content[0].type == 1) {
+            a = &m.letters[m.FindLetter(pt.content[0])];
+        } else if (pt.content[0].type == 2) {
+            a = &m.digits[m.FindDigit(pt.content[0])];
+        } else if (pt.content[0].type == 3) {
+            a = &m.symbols[m.FindSymbol(pt.content[0])];
+        }
+
+        int total_work = pt.max_indices[0];
+
+        int base_chunk = total_work / size;
+        int remain_pack = total_work % size;
+        int start, end;
+
+        if (rank < remain_pack) {
+            start = rank * (base_chunk + 1);
+            end = start + base_chunk + 1;
+        } else {
+            start = remain_pack * (base_chunk + 1) + (rank - remain_pack) * base_chunk;
+            end = start + base_chunk;
+        }
+
+        std::vector<std::string> local_guesses;
+
+        // OpenMP 并行部分
+        #pragma omp parallel
+        {
+            std::vector<std::string> thread_guesses;
+
+            #pragma omp for nowait schedule(static)
+            for (int i = start; i < end; i++) {
+                thread_guesses.push_back(a->ordered_values[i]);
+            }
+
+            #pragma omp critical
+            {
+                guesses.insert(guesses.end(), thread_guesses.begin(), thread_guesses.end());
+            }
+        }
+
+        int local_count = end - start;
+        int global_count = 0;
+        MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        total_guesses = global_count;
+    }
+    else {
+        string prefix;
+        int seg_idx = 0;
+        for (int idx : pt.curr_indices) {
+            if (pt.content[seg_idx].type == 1) {
+                prefix += m.letters[m.FindLetter(pt.content[seg_idx])].ordered_values[idx];
+            } else if (pt.content[seg_idx].type == 2) {
+                prefix += m.digits[m.FindDigit(pt.content[seg_idx])].ordered_values[idx];
+            } else if (pt.content[seg_idx].type == 3) {
+                prefix += m.symbols[m.FindSymbol(pt.content[seg_idx])].ordered_values[idx];
+            }
+            seg_idx += 1;
+            if (seg_idx == pt.content.size() - 1) break;
+        }
+
+        segment *a;
+        if (pt.content[pt.content.size() - 1].type == 1) {
+            a = &m.letters[m.FindLetter(pt.content[pt.content.size() - 1])];
+        } else if (pt.content[pt.content.size() - 1].type == 2) {
+            a = &m.digits[m.FindDigit(pt.content[pt.content.size() - 1])];
+        } else if (pt.content[pt.content.size() - 1].type == 3) {
+            a = &m.symbols[m.FindSymbol(pt.content[pt.content.size() - 1])];
+        }
+
+        int total_work = pt.max_indices[pt.content.size() - 1];
+
+        int base_chunk = total_work / size;
+        int remain_pack = total_work % size;
+        int start, end;
+
+        if (rank < remain_pack) {
+            start = rank * (base_chunk + 1);
+            end = start + base_chunk + 1;
+        } else {
+            start = remain_pack * (base_chunk + 1) + (rank - remain_pack) * base_chunk;
+            end = start + base_chunk;
+        }
+
+        std::vector<std::string> local_guesses;
+
+        // OpenMP 并行部分
+        #pragma omp parallel
+        {
+            std::vector<std::string> thread_guesses;
+
+            #pragma omp for nowait schedule(static)
+            for (int i = start; i < end; i++) {
+                thread_guesses.push_back(prefix + a->ordered_values[i]);
+            }
+
+            #pragma omp critical
+            {
+                guesses.insert(guesses.end(), thread_guesses.begin(), thread_guesses.end());
+            }
+        }
+
+        int local_count = end - start;
+        int global_count = 0;
+        MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        total_guesses = global_count;
+    }
+}
+
+
+void PriorityQueue::MPIPopNext() {
+    // 初始化
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    // 每次批量划分 PT，batch_size 可调整
+    int batch_size = 4; // 一批处理 4 个 PT，可以自己设更合理的值
+    int actual_batch = min(batch_size, (int)priority.size());
+
+    // 提取前 actual_batch 个 PT
+    vector<PT> batch_pt(priority.begin(), priority.begin() + actual_batch);
+
+    // 动态划分 PT 任务给各进程
+    int base_chunk = actual_batch / size;
+    int remain_pack = actual_batch % size;
+
+    int start, end;
+
+    if (rank < remain_pack) {
+        start = rank * (base_chunk + 1);
+        end = start + base_chunk + 1;
+    } else {
+        start = remain_pack * (base_chunk + 1) + (rank - remain_pack) * base_chunk;
+        end = start + base_chunk;
+    }
+
+    // 每个进程串行处理自己负责的 PT
+    for (int i = start; i < end; ++i) {
+        Generate(batch_pt[i]);
+    }
+
+    // 汇总每个进程的猜测总数
+    int local_count = total_guesses;
+    int global_count = 0;
+    MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    total_guesses = global_count;
+
+    // 队列中删除已处理的 PT
+    priority.erase(priority.begin(), priority.begin() + actual_batch);
+
+    // 生成下一批的 PT 并插入队列
+    vector<PT> new_pts;
+    for (PT &pt : batch_pt) {
+        vector<PT> generated_pts = pt.NewPTs();
+        for (PT& gen_pt : generated_pts) {
+            CalProb(pt);
+            generated_pts.push_back(gen_pt);
+        }
+    }
+    
+    // 插入新生成的 PT
+    for (PT& pt : new_pts) {
+        bool inserted = false;
+        for (auto iter = priority.begin(); iter != priority.end(); iter++) {
+            if (pt.prob > iter->prob) {
+                priority.emplace(iter, pt);
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) {
+            priority.emplace_back(pt);
         }
     }
 }

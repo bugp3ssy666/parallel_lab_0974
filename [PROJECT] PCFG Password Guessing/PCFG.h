@@ -1,11 +1,17 @@
 #include <string>
 #include <iostream>
+#include <sstream>
 #include <unordered_map>
 #include <queue>
 #include <omp.h>
 #include <pthread.h>    // 使用 pthread
 #include <omp.h>        // 使用 OpenMP
+#include <unistd.h>
+#include <mpi.h>        // 使用 mpi
+#include <condition_variable>
 #include <atomic>
+#include <cstring>
+#include <algorithm>
 // #include <chrono>   
 // using namespace chrono;
 using namespace std;
@@ -171,8 +177,18 @@ public:
     // openmp 生成
     void OpenMPGenerate(PT pt);
 
-    // 将优先队列最前面的一个PT
+    // mpi 生成
+    void MPIGenerate(PT pt);
+    
+    // mpi + openmp
+    void MPIplusOpenMPGenerate(PT pt);
+
+    // 将优先队列最前面的一个 PT
     void PopNext();
+    
+    // mpi 并行化的批量处理 PT
+    void MPIPopNext();
+
     int total_guesses = 0;
     vector<string> guesses;
 };
@@ -181,12 +197,12 @@ public:
 
 // 线程数据结构
 typedef struct {
-    int t_id;
-    segment* a;
-    int max_index;
-    vector<string>* guesses;
-    int* total_guesses;
-    string init_guess;
+    int t_id;                   // 线程 id
+    segment* a;                 // segment 指针，取表中值生成猜测需调用
+    int max_index;              // 该 segment 的取值总数，即表值最大索引
+    vector<string>* guesses;    // 指向所有生成的猜测
+    int* total_guesses;         // 指向生成猜测总量
+    string init_guess;          // 猜测前缀，多 segment 的猜测时需调用
 } threadParam_t;
 
 // 线程函数
@@ -194,11 +210,11 @@ void* threadFunc(void* param);
 
 // 线程任务结构
 typedef struct {
-    int t_start, t_end;
-    string t_preguess;
-    vector<string>* shared_values;
-    string* shared_guesses;
-    bool t_active;
+    int t_start, t_end;         // 该任务生成猜测的起点和终点
+    string t_preguess;          // 猜测前缀
+    vector<string>* shared_values;  // 指向 segment 的所有取值的向量组
+    string* shared_guesses;     // 指向总任务的猜测结果，所有线程共享一个字符串组
+    bool t_active;              // 标识此任务是否是活跃状态（处于任务队列/正在被线程处理）
 } threadTask_t;
 
 // 线程池类
@@ -220,7 +236,7 @@ class ThreadPool
     // 队列互斥锁
     pthread_mutex_t task_mutex;
     // 线程安全的停止符号
-    std::atomic<bool> terminate;
+    bool terminate;
     
     public:
     // 构造函数
