@@ -179,6 +179,8 @@ int main(int argc, char *argv[])
 
     PriorityQueue q;
 
+    
+
     // MPI计时：训练阶段
     double mpi_time_train_start = MPI_Wtime();
     if (rank == 0) {
@@ -197,6 +199,22 @@ int main(int argc, char *argv[])
 
     // 等待所有进程完成训练
     MPI_Barrier(MPI_COMM_WORLD);
+
+    // 加载一些测试数据
+    unordered_set<std::string> test_set;
+    ifstream test_data("/guessdata/Rockyou-singleLined-full.txt");
+    int test_count=0;
+    string pw;
+    while(test_data>>pw)
+    {   
+        test_count+=1;
+        test_set.insert(pw);
+        if (test_count>=1000000)
+        {
+            break;
+        }
+    }
+    int cracked=0;
 
     q.init();
 
@@ -233,7 +251,7 @@ int main(int argc, char *argv[])
         if (q.total_guesses - curr_num >= 100000)
         {
             if (rank == 0) {
-                cout << "Process " << rank << " - Global guesses generated: " << history + q.total_guesses << endl;
+                cout << "Guesses generated: " << history + q.total_guesses << endl;
             }
             curr_num = q.total_guesses;
 
@@ -249,6 +267,7 @@ int main(int argc, char *argv[])
                     cout << "Guess time: " << time_guess<< " seconds" << endl;
                     cout << "Hash time: " << time_hash << "seconds"<<endl;
                     cout << "Train time: " << time_train << " seconds" << endl;
+                    cout << "Cracked: " << cracked << endl;
                 }
                 break;
             }
@@ -271,6 +290,9 @@ int main(int argc, char *argv[])
             for (int batch = 0; batch < numFullBatches; ++batch) {
                 for (int i = 0; i < batchSize; ++i) {
                     inputs[i] = q.guesses[batch * batchSize + i];
+                    if (test_set.find(inputs[i]) != test_set.end()) {
+                        cracked+=1;
+                    }
                 }
                 SIMDMD5Hash_4(inputs, state);
             }
@@ -279,6 +301,9 @@ int main(int argc, char *argv[])
             if (remainder > 0) {
                 for (int i = 0; i < remainder; ++i) {
                     inputs[i] = q.guesses[numFullBatches * batchSize + i];
+                    if (test_set.find(inputs[i]) != test_set.end()) {
+                        cracked+=1;
+                    }
                 }
                 // 剩余的用单个哈希函数处理
                 for (int i = 0; i < remainder; ++i) {

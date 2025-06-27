@@ -1131,7 +1131,7 @@ void PriorityQueue::MPIPopNext() {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     // 每次批量划分 PT，batch_size 可调整
-    int batch_size = 4; // 一批处理 4 个 PT，可以自己设更合理的值
+    int batch_size = 4; // 一批处理 4 个 PT，可调整
     int actual_batch = min(batch_size, (int)priority.size());
 
     // 提取前 actual_batch 个 PT
