@@ -17,3 +17,6 @@ openmp:
 
 ![c4ab142aea1861f2902dc1a3e34ee755.png](./_resources/c4ab142aea1861f2902dc1a3e34ee755.png)
 
+MPI:
+
+![img_v3_02n5_b358d31f-827d-40dd-abe8-7261e926dfeg](https://github.com/user-attachments/assets/00bd59d1-2c43-4f9c-9a60-0048854460a1)
